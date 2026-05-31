@@ -21,19 +21,17 @@ pub async fn export_db(docker: &DockerManager, site: &SiteConfig) -> Result<Stri
     let file = format!("db-{stamp}.sql");
 
     // Exportar dentro del container a la raíz pública (montada en el host).
-    let out = docker
-        .exec(
-            &cname,
-            vec![
-                "php",
-                "/usr/local/bin/wp",
-                "--path=/var/www/html",
-                "db",
-                "export",
-                &format!("/var/www/html/{file}"),
-            ],
-        )
-        .await?;
+    // Vía wpcli::run → corre como www-data (WP-CLI no admite root).
+    let out = crate::wpcli::run(
+        docker,
+        site,
+        &[
+            "db".to_string(),
+            "export".to_string(),
+            format!("/var/www/html/{file}"),
+        ],
+    )
+    .await?;
 
     let in_public = site.public_dir().join(&file);
     if !in_public.exists() {

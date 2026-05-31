@@ -1,17 +1,27 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import type { SiteState } from '$lib/types';
+  import type { SiteState, Endpoint } from '$lib/types';
 
   let sites = $state<SiteState[]>([]);
+  let endpoint = $state<Endpoint | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let busy = $state<Record<string, boolean>>({});
 
+  // Etiqueta de host con puerto solo si el panel publica en uno alterno.
+  function hostLabel(s: SiteState): string {
+    if (!endpoint) return s.config.domain;
+    const ssl = s.config.services.nginx.ssl;
+    const port = ssl ? endpoint.httpsPort : endpoint.httpPort;
+    const std = ssl ? 443 : 80;
+    return port === std ? s.config.domain : `${s.config.domain}:${port}`;
+  }
+
   async function load() {
     try {
       error = null;
-      sites = await api.getSites();
+      [sites, endpoint] = await Promise.all([api.getSites(), api.panelEndpoint()]);
     } catch (e) {
       error = String(e);
     } finally {
@@ -91,7 +101,7 @@
                 class:bg-amber-500={s.status === 'migrationPending'}
               ></span>
               <a href={`/site/${s.config.id}`} class="font-medium hover:underline">{s.config.name}</a>
-              <span class="text-xs text-zinc-500">{s.config.domain}</span>
+              <span class="text-xs text-zinc-500">{hostLabel(s)}</span>
               <span class="text-xs text-zinc-400">
                 PHP {s.config.services.php.version} · {s.config.services.db.type} {s.config.services.db.version}
               </span>

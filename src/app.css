@@ -3,7 +3,9 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
+  /* Acento azul eléctrico para controles nativos (checkbox/radio/range). */
+  accent-color: #4d8eff;
 }
 
 html,
@@ -13,10 +15,41 @@ body {
 }
 
 body {
-  @apply bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100;
+  @apply bg-zinc-950 text-zinc-100;
   font-family:
     system-ui,
     -apple-system,
     'Segoe UI',
     sans-serif;
+}
+
+@layer base {
+  /* Controles de formulario: nunca fondo/texto blanco. Fondo navy + texto
+     claro + foco azul. Aplica a todo input/select/textarea del panel. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea {
+    @apply rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-zinc-100;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    @apply text-zinc-500;
+  }
+
+  input:focus-visible:not([type='checkbox']):not([type='radio']),
+  select:focus-visible,
+  textarea:focus-visible {
+    @apply border-primary outline-none ring-1 ring-primary;
+  }
+}
+
+@layer components {
+  /* Clase utilitaria reutilizada en los formularios. */
+  .input {
+    @apply rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-zinc-100;
+  }
+  .input:focus-visible {
+    @apply border-primary outline-none ring-1 ring-primary;
+  }
 }

@@ -4,7 +4,7 @@
 //! con necesidades iguales se comparten. Containers por proyecto solo mientras el
 //! proyecto está activo; nginx/DB/mailpit compartidos y on-demand.
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use bollard::container::{
     Config, CreateContainerOptions, ListContainersOptions, RemoveContainerOptions,
     StartContainerOptions, StopContainerOptions,
@@ -18,7 +18,7 @@ use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::config::{DbService, SiteConfig, SiteStatus};
+use crate::config::{DbService, DbType, SiteConfig, SiteStatus};
 use crate::{domain, nginx};
 
 pub const NETWORK: &str = "panel-net";
@@ -147,6 +147,7 @@ impl DockerManager {
             self.docker
                 .start_container(&name, None::<StartContainerOptions<String>>)
                 .await?;
+            self.wait_db_ready(&name, db).await?;
             return Ok(name);
         }
 
@@ -174,7 +175,31 @@ impl DockerManager {
         self.docker
             .start_container(&name, None::<StartContainerOptions<String>>)
             .await?;
+        self.wait_db_ready(&name, db).await?;
         Ok(name)
+    }
+
+    /// Espera a que la DB acepte conexiones **por TCP** antes de seguir. Crítico:
+    /// en su primer arranque, la imagen oficial de MySQL acepta el socket local
+    /// (fase de init `--skip-networking`) ANTES de abrir el puerto TCP; si
+    /// `create_database`/`wp config create` corren en esa ventana, fallan. El
+    /// chequeo fuerza `-h127.0.0.1` para gatear exactamente sobre el TCP.
+    async fn wait_db_ready(&self, container: &str, db: &DbService) -> Result<()> {
+        let check: Vec<&str> = match db.db_type {
+            DbType::Mysql | DbType::Mariadb => {
+                vec!["mysql", "-h127.0.0.1", "-uroot", "-ppanel", "-e", "SELECT 1"]
+            }
+            DbType::Postgres => vec!["pg_isready", "-h", "127.0.0.1", "-U", "panel"],
+        };
+        for _ in 0..120 {
+            if self.exec(container, check.clone()).await.is_ok() {
+                return Ok(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        Err(anyhow!(
+            "la base de datos '{container}' no estuvo lista (timeout 60s)"
+        ))
     }
 
     /// Arranca el capturador de correo compartido `panel-mailpit` (axllent/mailpit).
@@ -290,17 +315,33 @@ impl DockerManager {
 
     /// Arranca el reverse-proxy nginx compartido si no está corriendo.
     /// Monta el directorio de vhosts (host) y la raíz de proyectos (ro).
+    ///
+    /// Antes de bindear elige un *endpoint* libre (ver `select_endpoint`) y hace
+    /// preflight para fallar con un mensaje claro en vez del 500 opaco de Docker.
     pub async fn ensure_nginx(&self) -> Result<()> {
         if self.is_running(NGINX).await {
             return Ok(());
         }
+
+        let ep = Self::select_endpoint()?;
+        Self::ensure_endpoint_dns(&ep)?;
+        Self::preflight_endpoint(&ep)?;
+
         self.ensure_image("nginx:alpine").await?;
 
+        // Un panel-nginx parado puede arrastrar un binding viejo (de un intento
+        // anterior con el puerto ocupado): recrear siempre con el endpoint actual.
         if self.exists(NGINX).await {
             self.docker
-                .start_container(NGINX, None::<StartContainerOptions<String>>)
-                .await?;
-            return Ok(());
+                .remove_container(
+                    NGINX,
+                    Some(RemoveContainerOptions {
+                        force: true,
+                        ..Default::default()
+                    }),
+                )
+                .await
+                .ok();
         }
 
         let conf_d = nginx::conf_d_dir()?;
@@ -310,15 +351,15 @@ impl DockerManager {
         ports.insert(
             "80/tcp".to_string(),
             Some(vec![PortBinding {
-                host_ip: Some("127.0.0.1".to_string()),
-                host_port: Some("80".to_string()),
+                host_ip: Some(ep.loopback_ip.clone()),
+                host_port: Some(ep.http_port.to_string()),
             }]),
         );
         ports.insert(
             "443/tcp".to_string(),
             Some(vec![PortBinding {
-                host_ip: Some("127.0.0.1".to_string()),
-                host_port: Some("443".to_string()),
+                host_ip: Some(ep.loopback_ip.clone()),
+                host_port: Some(ep.https_port.to_string()),
             }]),
         );
 
@@ -356,6 +397,96 @@ impl DockerManager {
         self.docker
             .start_container(NGINX, None::<StartContainerOptions<String>>)
             .await?;
+        Ok(())
+    }
+
+    // -- selección del punto de publicación (endpoint) ----------------------
+
+    /// Endpoint a usar: el persistido (estable para sitios ya instalados) o uno
+    /// autodetectado la primera vez. Ver `config::Endpoint`.
+    fn select_endpoint() -> Result<crate::config::Endpoint> {
+        if let Some(ep) = crate::config::load_endpoint()? {
+            return Ok(ep);
+        }
+        let ep = Self::autoselect_endpoint();
+        crate::config::save_endpoint(&ep)?;
+        Ok(ep)
+    }
+
+    /// Elige endpoint libre por capas:
+    /// 1. `127.0.0.1:80/443` si está libre.
+    /// 2. Conflicto por IP concreta → otra IP loopback en 80/443 (URLs limpias).
+    /// 3. Conflicto wildcard (LocalWP) o sin loopback → `127.0.0.1` + puertos alt.
+    fn autoselect_endpoint() -> crate::config::Endpoint {
+        use crate::config::Endpoint;
+        use crate::netcheck;
+        use std::net::Ipv4Addr;
+
+        let lo = Ipv4Addr::new(127, 0, 0, 1);
+        let http = netcheck::port_status(80);
+        let https = netcheck::port_status(443);
+
+        if http.free_for(lo) && https.free_for(lo) {
+            return Endpoint::default();
+        }
+
+        if !http.is_wildcard() && !https.is_wildcard() {
+            if let Some(ip) = netcheck::pick_loopback_ip(80, 443) {
+                return Endpoint {
+                    loopback_ip: ip.to_string(),
+                    http_port: 80,
+                    https_port: 443,
+                };
+            }
+        }
+
+        let hp = netcheck::pick_alt_port(8080).unwrap_or(8080);
+        let mut sp = netcheck::pick_alt_port(8443).unwrap_or(8443);
+        if sp == hp {
+            sp = netcheck::pick_alt_port(hp + 1).unwrap_or(hp + 1);
+        }
+        Endpoint {
+            loopback_ip: crate::domain::DEFAULT_IP.to_string(),
+            http_port: hp,
+            https_port: sp,
+        }
+    }
+
+    /// Si el endpoint usa una IP loopback alterna, asegura que dnsmasq la resuelve
+    /// (instalación privilegiada vía pkexec, idempotente).
+    fn ensure_endpoint_dns(ep: &crate::config::Endpoint) -> Result<()> {
+        if ep.loopback_ip == crate::domain::DEFAULT_IP {
+            return Ok(());
+        }
+        if crate::domain::resolves_to(&ep.loopback_ip) {
+            return Ok(());
+        }
+        crate::domain::install_wildcard(&ep.loopback_ip).with_context(|| {
+            format!("apuntando dnsmasq a {} para el panel", ep.loopback_ip)
+        })?;
+        Ok(())
+    }
+
+    /// Verifica que el endpoint elegido sea realmente bindeable; si no, error
+    /// claro (nombrando al proceso que lo ocupa) en vez del 500 de Docker.
+    fn preflight_endpoint(ep: &crate::config::Endpoint) -> Result<()> {
+        use crate::netcheck;
+        let ip: std::net::Ipv4Addr = ep
+            .loopback_ip
+            .parse()
+            .map_err(|_| anyhow!("IP loopback inválida en la config: {}", ep.loopback_ip))?;
+        for (port, label) in [(ep.http_port, "HTTP"), (ep.https_port, "HTTPS")] {
+            if !netcheck::port_status(port).free_for(ip) {
+                let who = netcheck::holder_name(port)
+                    .map(|n| format!(" (lo usa: {n})"))
+                    .unwrap_or_default();
+                return Err(anyhow!(
+                    "el puerto {port} ({label}) ya está ocupado en {ip}{who}. \
+                     Apaga ese servicio (¿LocalWP?) o borra \
+                     ~/.config/wordpress-panel/panel.json para reasignar puerto."
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -554,6 +685,18 @@ impl DockerManager {
 
     /// Ejecuta un comando en un container y devuelve stdout+stderr combinado.
     pub async fn exec(&self, container: &str, cmd: Vec<&str>) -> Result<String> {
+        self.exec_as(container, cmd, None).await
+    }
+
+    /// Como `exec` pero fijando el usuario del proceso. WP-CLI DEBE correr como
+    /// `www-data` (no root: WP-CLI lo rechaza, y así los archivos generados —
+    /// wp-config.php, etc.— quedan con el dueño del host vía el remapeo de uid).
+    pub async fn exec_as(
+        &self,
+        container: &str,
+        cmd: Vec<&str>,
+        user: Option<&str>,
+    ) -> Result<String> {
         let exec = self
             .docker
             .create_exec(
@@ -562,6 +705,7 @@ impl DockerManager {
                     cmd: Some(cmd.iter().map(|s| s.to_string()).collect()),
                     attach_stdout: Some(true),
                     attach_stderr: Some(true),
+                    user: user.map(|u| u.to_string()),
                     ..Default::default()
                 },
             )
@@ -574,6 +718,20 @@ impl DockerManager {
             while let Some(chunk) = output.next().await {
                 let msg = chunk?;
                 out.push_str(&msg.to_string());
+            }
+        }
+
+        // Comprobar el código de salida: un comando que falla (p.ej. `wp config
+        // create`) NO debe tragarse en silencio, o el proyecto queda a medias
+        // (WP sin instalar) y `create_site` devuelve Ok engañosamente.
+        let inspect = self.docker.inspect_exec(&exec.id).await?;
+        if let Some(code) = inspect.exit_code {
+            if code != 0 {
+                let cmd = cmd.join(" ");
+                return Err(anyhow!(
+                    "`{cmd}` falló en {container} (código {code}): {}",
+                    out.trim()
+                ));
             }
         }
         Ok(out)

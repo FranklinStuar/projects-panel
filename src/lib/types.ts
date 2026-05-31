@@ -51,6 +51,21 @@ export interface SiteConfig {
   lastMigratedAt: string | null;
 }
 
+/// Espejo de `config::Endpoint`: dónde publica el panel en el host.
+export interface Endpoint {
+  loopbackIp: string;
+  httpPort: number;
+  httpsPort: number;
+}
+
+/// URL pública del sitio según el endpoint (puerto solo si no es el estándar).
+export function siteUrl(ep: Endpoint, domain: string, ssl: boolean): string {
+  if (ssl) {
+    return ep.httpsPort === 443 ? `https://${domain}` : `https://${domain}:${ep.httpsPort}`;
+  }
+  return ep.httpPort === 80 ? `http://${domain}` : `http://${domain}:${ep.httpPort}`;
+}
+
 export type SiteStatus = 'running' | 'stopped' | 'migrationPending';
 
 export interface SiteState {

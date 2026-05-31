@@ -22,5 +22,6 @@ pub async fn run(docker: &DockerManager, site: &SiteConfig, args: &[String]) -> 
     for a in args {
         cmd.push(a.as_str());
     }
-    docker.exec(&cname, cmd).await
+    // WP-CLI como www-data: root está prohibido y rompe la propiedad de archivos.
+    docker.exec_as(&cname, cmd, Some("www-data")).await
 }

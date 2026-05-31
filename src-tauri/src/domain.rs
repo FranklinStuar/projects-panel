@@ -8,11 +8,17 @@
 //! paso de "primera configuración"; aquí se genera el snippet y se comprueba si
 //! el sistema ya resuelve.
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 
-pub const WILDCARD_RULE: &str = "address=/test/127.0.0.1\n";
+/// IP por defecto a la que resuelven los `*.test`.
+pub const DEFAULT_IP: &str = "127.0.0.1";
+
+/// Regla dnsmasq wildcard para una IP loopback concreta.
+pub fn wildcard_rule(ip: &str) -> String {
+    format!("address=/test/{ip}\n")
+}
 
 /// Ruta donde el panel deja el snippet listo para instalar.
 pub fn snippet_path() -> Result<PathBuf> {
@@ -33,12 +39,45 @@ pub fn wildcard_active() -> bool {
     }
 }
 
+/// ¿Los `.test` resuelven exactamente a `ip`? (necesario al usar IP alterna).
+pub fn resolves_to(ip: &str) -> bool {
+    match ("panel-probe.test", 0u16).to_socket_addrs() {
+        Ok(addrs) => addrs.map(|a| a.ip().to_string()).any(|s| s == ip),
+        Err(_) => false,
+    }
+}
+
 /// Deja el snippet escrito en la config del panel. No instala (sin root aquí).
 pub fn ensure_wildcard() -> Result<()> {
     if wildcard_active() {
         return Ok(());
     }
     let path = snippet_path()?;
-    std::fs::write(&path, WILDCARD_RULE)?;
+    std::fs::write(&path, wildcard_rule(DEFAULT_IP))?;
+    Ok(())
+}
+
+/// Instala/reescribe la regla wildcard apuntando a `ip` y recarga NetworkManager.
+/// Requiere privilegios → usa `pkexec` (diálogo gráfico). Idempotente.
+pub fn install_wildcard(ip: &str) -> Result<()> {
+    let target = install_target();
+    let rule = wildcard_rule(ip);
+    // `ip` viene de IPs loopback generadas por el panel (127.0.0.x): sin metacaracteres.
+    let script = format!(
+        "install -d /etc/NetworkManager/dnsmasq.d && \
+         printf '%s' '{rule}' > '{target}' && \
+         (systemctl reload NetworkManager || systemctl restart NetworkManager)"
+    );
+    let status = std::process::Command::new("pkexec")
+        .arg("sh")
+        .arg("-c")
+        .arg(&script)
+        .status()
+        .map_err(|err| anyhow!("no se pudo ejecutar pkexec: {err}"))?;
+    if !status.success() {
+        return Err(anyhow!(
+            "pkexec no pudo instalar la regla dnsmasq para {ip}"
+        ));
+    }
     Ok(())
 }

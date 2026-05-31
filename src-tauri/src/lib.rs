@@ -9,6 +9,7 @@ mod docker;
 mod domain;
 mod github;
 mod logs;
+mod netcheck;
 mod nginx;
 mod php;
 mod ssl;
@@ -97,6 +98,13 @@ async fn create_site(req: NewSiteRequest) -> CmdResult<SiteConfig> {
 #[tauri::command]
 async fn list_wp_versions() -> CmdResult<Vec<WpVersion>> {
     wordpress::fetch_versions().await.map_err(e)
+}
+
+/// Punto de publicación del panel (IP loopback + puertos host). El frontend lo
+/// usa para mostrar la URL real del sitio cuando hay puerto alterno.
+#[tauri::command]
+fn panel_endpoint() -> CmdResult<config::Endpoint> {
+    Ok(config::endpoint_or_default())
 }
 
 /// Abre el admin en el navegador (auto-login si el proyecto lo tiene activado).
@@ -346,6 +354,7 @@ pub fn run() {
             exec_wpcli,
             create_site,
             list_wp_versions,
+            panel_endpoint,
             open_admin,
             stream_logs,
             stop_logs,

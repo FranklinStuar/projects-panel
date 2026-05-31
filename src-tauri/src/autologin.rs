@@ -21,7 +21,7 @@ pub async fn open_admin(app: &AppHandle, docker: &DockerManager, site: &SiteConf
         return Err(anyhow!("el proyecto '{}' no está encendido", site.name));
     }
 
-    let scheme = if site.services.nginx.ssl { "https" } else { "http" };
+    let base = crate::config::endpoint_or_default().site_url(&site.domain, site.services.nginx.ssl);
 
     let url = if site.one_click_admin {
         let token = Uuid::new_v4().simple().to_string();
@@ -35,9 +35,9 @@ pub async fn open_admin(app: &AppHandle, docker: &DockerManager, site: &SiteConf
             "60".to_string(),
         ];
         crate::wpcli::run(docker, site, &args).await?;
-        format!("{scheme}://{}/?panel_autologin={token}", site.domain)
+        format!("{base}/?panel_autologin={token}")
     } else {
-        format!("{scheme}://{}/wp-admin/", site.domain)
+        format!("{base}/wp-admin/")
     };
 
     app.opener()

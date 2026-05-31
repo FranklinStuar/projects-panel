@@ -84,13 +84,14 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | Módulo | Responsabilidad |
 |---|---|
 | `lib.rs` | Comandos `#[tauri::command]`, `run()` (incl. `GTK_CSD=0` en Linux para decoración nativa), registro en `invoke_handler!`. |
-| `config.rs` | Modelos (`SiteConfig`, `Services`, `DbType`, `SiteStatus`, `SiteState`), rutas (`config_dir`, `projects_root`), persistencia (`load_all_sites`, `read/write_site_config`, `find_site`). |
-| `docker.rs` | `DockerManager` (bollard): red, ensure_db/ensure_nginx, start/stop_site, teardown, exec, helpers uid/gid e imagen-context. |
+| `config.rs` | Modelos (`SiteConfig`, `Services`, `DbType`, `SiteStatus`, `SiteState`), rutas (`config_dir`, `projects_root`), persistencia (`load_all_sites`, `read/write_site_config`, `find_site`). **`Endpoint`** (dónde publica el panel en el host: `loopbackIp`/`httpPort`/`httpsPort`, helper `site_url`) + `PanelConfig` persistido en `panel.json` (`load/save_endpoint`, `endpoint_or_default`). |
+| `docker.rs` | `DockerManager` (bollard): red, ensure_db/ensure_nginx, start/stop_site, teardown, `exec`/`exec_as` (fija usuario; chequea exit code), helpers uid/gid e imagen-context. `wait_db_ready` (gatea sobre TCP antes de usar la DB). Selección de endpoint (`select_endpoint`/`autoselect_endpoint`/`preflight_endpoint`) con autodetección de puerto libre. |
 | `nginx.rs` | Render/escritura/borrado de vhosts en `~/.config/wordpress-panel/nginx/conf.d/`. |
 | `php.rs` | `ensure_php_image` (docker build por versión), `wp_cli_phar_path` (descarga el phar). |
-| `domain.rs` | dnsmasq wildcard `*.test`: snippet + detección de resolución. |
+| `domain.rs` | dnsmasq wildcard `*.test`: snippet + detección de resolución (`resolves_to`). Regla parametrizada por IP (`wildcard_rule`); `install_wildcard` la instala vía `pkexec` y recarga NetworkManager (para endpoint con IP loopback alterna). |
+| `netcheck.rs` | Lee `/proc/net/tcp{,6}` para clasificar puertos del host: `Free`/`Wildcard`/`Specific(IPs)`. Selectores `pick_loopback_ip`/`pick_alt_port` y `holder_name` (proceso que ocupa un puerto). Base de la selección de endpoint de `docker.rs`. |
 | `wordpress.rs` | `create_site` end-to-end, `download_core` (tarball), `fetch_versions` (API wp.org, cache 24h), DB/wp-config/install vía WP-CLI, mu-plugin mailpit. |
-| `wpcli.rs` | `run()` WP-CLI dentro del container del proyecto. |
+| `wpcli.rs` | `run()` WP-CLI dentro del container del proyecto, como `www-data` (WP-CLI rechaza root). |
 | `logs.rs` | `spawn_stream`: sigue (`follow`) los logs del container y los emite como evento `log:{id}`. Cancelable vía `JoinHandle::abort()`. |
 | `autologin.rs` | `open_admin`: token efímero (transient WP, 60s, un solo uso) + abre navegador; el mu-plugin `panel-autologin.php` valida y loguea al admin. |
 | `github.rs` | `gh`/`git` en el HOST (no container, los archivos están bind-montados): `status`, `clone`, `pull`, `remove_dir`, `propose_path`. Sin auth propia. |
@@ -113,6 +114,7 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `exec_wpcli` | `id, args[]` | `String` | WP-CLI en el container. |
 | `create_site` | `req: NewSiteRequest` | `SiteConfig` | Crea/instala proyecto completo. |
 | `list_wp_versions` | — | `Vec<WpVersion>` | Versiones WP (cache 24h). |
+| `panel_endpoint` | — | `Endpoint` | Punto de publicación del panel (IP loopback + puertos); el frontend muestra el puerto si es alterno. |
 | `open_admin` | `id` | `()` | Abre el admin en el navegador (auto-login si está activo). |
 | `stream_logs` | `id` | `()` | Inicia el stream de logs → eventos `log:{id}`. |
 | `stop_logs` | `id` | `()` | Detiene el stream de logs. |
@@ -164,6 +166,7 @@ sigue funcionando sin widget.
 ├── wp-cli.phar                    montado ro en cada wp-{id}
 ├── wp-versions.json               cache 24h de versiones WP
 ├── minio-data/                    datos del S3 compartido (panel-minio)
+├── panel.json                     estado global del panel (Endpoint elegido)
 └── dnsmasq-panel.conf             snippet wildcard (referencia)
 
 ~/panel-wp/{slug}/                 (projects_root) — FUENTE DE VERDAD
@@ -183,5 +186,10 @@ Sistema (fuera del repo): /etc/NetworkManager/dnsmasq.d/wordpress-panel.conf
 - SvelteKit + Svelte 5 (runes: `$state`, `$derived`, `$effect`, `$props`).
 - `adapter-static` modo SPA: `+layout.ts` con `ssr=false`, `prerender=false`,
   fallback `index.html`. El routing (incl. `/site/[id]`) es 100% cliente.
-- `lib/api.ts` envuelve `invoke`. `lib/types.ts` = espejo de los modelos serde.
-- Tailwind (`darkMode: 'class'`, clase `dark` en `<html>`).
+- `lib/api.ts` envuelve `invoke`. `lib/types.ts` = espejo de los modelos serde
+  (incl. `Endpoint` + helper `siteUrl`).
+- Tailwind (`darkMode: 'class'`, clase `dark` en `<html>`). Tema dark-only navy
+  **"DevFlow Dark Blue"** (`DESIGN.md`): la escala `zinc` está remapeada a navy
+  en `tailwind.config.js`, así los `dark:bg-zinc-*` existentes heredan el tema
+  sin tocarse; token `primary` (#4d8eff). Estilos base de inputs (fondo navy,
+  texto claro, foco azul) globales en `app.css` (`@layer base`/`components`).

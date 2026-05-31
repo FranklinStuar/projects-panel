@@ -271,9 +271,3 @@
     </form>
   {/if}
 </div>
-
-<style>
-  :global(.input) {
-    @apply rounded border border-zinc-300 bg-white px-2 py-1.5 dark:border-zinc-700 dark:bg-zinc-900;
-  }
-</style>

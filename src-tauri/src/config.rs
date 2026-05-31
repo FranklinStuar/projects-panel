@@ -137,6 +137,103 @@ impl SiteConfig {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Punto de publicación del panel (global, no por proyecto)
+// ---------------------------------------------------------------------------
+
+/// Dónde publica `panel-nginx` en el host. Se elige UNA vez (autodetección de
+/// puertos libres) y se persiste, porque WordPress guarda el `siteurl` con
+/// puerto: cambiarlo después rompería los sitios ya instalados.
+///
+/// - Normal: `127.0.0.1:80/443` (URLs limpias `sitio.test`).
+/// - Conflicto por IP concreta: otra IP loopback en 80/443 (sigue limpio).
+/// - Conflicto wildcard (LocalWP en `0.0.0.0:80`): `127.0.0.1` con puerto
+///   alterno (`sitio.test:8080`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Endpoint {
+    pub loopback_ip: String,
+    pub http_port: u16,
+    pub https_port: u16,
+}
+
+impl Default for Endpoint {
+    fn default() -> Self {
+        Endpoint {
+            loopback_ip: "127.0.0.1".to_string(),
+            http_port: 80,
+            https_port: 443,
+        }
+    }
+}
+
+impl Endpoint {
+    /// URL pública del sitio (con puerto solo si no es el estándar del esquema).
+    pub fn site_url(&self, domain: &str, ssl: bool) -> String {
+        if ssl {
+            if self.https_port == 443 {
+                format!("https://{domain}")
+            } else {
+                format!("https://{domain}:{}", self.https_port)
+            }
+        } else if self.http_port == 80 {
+            format!("http://{domain}")
+        } else {
+            format!("http://{domain}:{}", self.http_port)
+        }
+    }
+
+    /// ¿Es la configuración por defecto (127.0.0.1:80/443, URLs limpias)?
+    #[allow(dead_code)] // usado por la UI de estado del panel (Fase 4)
+    pub fn is_default(&self) -> bool {
+        *self == Endpoint::default()
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PanelConfig {
+    #[serde(default)]
+    pub endpoint: Option<Endpoint>,
+}
+
+/// `~/.config/wordpress-panel/panel.json` (estado global del panel).
+pub fn panel_config_path() -> Result<PathBuf> {
+    Ok(config_dir()?.join("panel.json"))
+}
+
+pub fn load_panel_config() -> Result<PanelConfig> {
+    let path = panel_config_path()?;
+    if !path.exists() {
+        return Ok(PanelConfig::default());
+    }
+    let raw = std::fs::read_to_string(&path).with_context(|| format!("leyendo {:?}", path))?;
+    Ok(serde_json::from_str(&raw).unwrap_or_default())
+}
+
+pub fn save_panel_config(cfg: &PanelConfig) -> Result<()> {
+    let path = panel_config_path()?;
+    let raw = serde_json::to_string_pretty(cfg)?;
+    std::fs::write(&path, raw).with_context(|| format!("escribiendo {:?}", path))?;
+    Ok(())
+}
+
+/// Endpoint ya elegido y persistido (si lo hay).
+pub fn load_endpoint() -> Result<Option<Endpoint>> {
+    Ok(load_panel_config()?.endpoint)
+}
+
+/// Endpoint efectivo para construir URLs; por defecto si aún no se eligió.
+pub fn endpoint_or_default() -> Endpoint {
+    load_endpoint().ok().flatten().unwrap_or_default()
+}
+
+pub fn save_endpoint(ep: &Endpoint) -> Result<()> {
+    let mut cfg = load_panel_config()?;
+    cfg.endpoint = Some(ep.clone());
+    save_panel_config(&cfg)
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum SiteStatus {

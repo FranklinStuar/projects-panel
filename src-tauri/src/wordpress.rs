@@ -298,8 +298,8 @@ async fn wp_core_install(
     site: &SiteConfig,
     req: &NewSiteRequest,
 ) -> Result<()> {
-    let scheme = if site.services.nginx.ssl { "https" } else { "http" };
-    let url = format!("{scheme}://{}", site.domain);
+    let ep = crate::config::endpoint_or_default();
+    let url = ep.site_url(&site.domain, site.services.nginx.ssl);
     let args = vec![
         "core".to_string(),
         "install".to_string(),

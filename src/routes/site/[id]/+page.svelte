@@ -3,9 +3,10 @@
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { page } from '$app/state';
   import { api } from '$lib/api';
-  import type { SiteState, GhStatus } from '$lib/types';
+  import type { SiteState, GhStatus, Endpoint } from '$lib/types';
 
   let site = $state<SiteState | null>(null);
+  let endpoint = $state<Endpoint | null>(null);
   let notFound = $state(false);
   let tab = $state<'info' | 'logs' | 'ext' | 'github' | 'svc'>('info');
   let error = $state<string | null>(null);
@@ -13,8 +14,18 @@
 
   const id = page.params.id;
 
+  // Etiqueta de host con puerto solo si el panel publica en uno alterno.
+  function hostLabel(s: SiteState): string {
+    if (!endpoint) return s.config.domain;
+    const ssl = s.config.services.nginx.ssl;
+    const port = ssl ? endpoint.httpsPort : endpoint.httpPort;
+    const std = ssl ? 443 : 80;
+    return port === std ? s.config.domain : `${s.config.domain}:${port}`;
+  }
+
   async function load() {
-    const all = await api.getSites();
+    const [all, ep] = await Promise.all([api.getSites(), api.panelEndpoint()]);
+    endpoint = ep;
     site = all.find((s) => s.config.id === id) ?? null;
     notFound = site === null;
   }
@@ -179,7 +190,7 @@
   <div class="mb-4 flex items-center justify-between">
     <div>
       <h1 class="text-lg font-semibold">{site.config.name}</h1>
-      <p class="text-sm text-zinc-500">{site.config.domain}</p>
+      <p class="text-sm text-zinc-500">{hostLabel(site)}</p>
     </div>
     <div class="flex items-center gap-2">
       {#if site.status === 'running'}
