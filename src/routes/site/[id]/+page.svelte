@@ -3,11 +3,11 @@
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { page } from '$app/state';
   import { api } from '$lib/api';
-  import type { SiteState } from '$lib/types';
+  import type { SiteState, GhStatus } from '$lib/types';
 
   let site = $state<SiteState | null>(null);
   let notFound = $state(false);
-  let tab = $state<'info' | 'logs' | 'ext'>('info');
+  let tab = $state<'info' | 'logs' | 'ext' | 'github'>('info');
   let error = $state<string | null>(null);
   let busy = $state(false);
 
@@ -95,13 +95,48 @@
     if (tab === 'ext') loadExt();
   });
 
+  // --- GitHub ---------------------------------------------------------------
+  let gh = $state<GhStatus | null>(null);
+  let ghError = $state<string | null>(null);
+  let ghBusy = $state(false);
+  let themeRepo = $state('');
+  let themeBranch = $state('main');
+  let pluginRepo = $state('');
+  let pluginBranch = $state('main');
+
+  async function loadGh() {
+    try {
+      gh = await api.ghStatus();
+    } catch (e) {
+      ghError = String(e);
+    }
+  }
+
+  async function ghAction(fn: () => Promise<unknown>) {
+    ghBusy = true;
+    ghError = null;
+    try {
+      await fn();
+      await load();
+    } catch (e) {
+      ghError = String(e);
+    } finally {
+      ghBusy = false;
+    }
+  }
+
+  $effect(() => {
+    if (tab === 'github' && gh === null) loadGh();
+  });
+
   onMount(load);
   onDestroy(stopLogs);
 
   const tabs = [
     { id: 'info', label: 'Info' },
     { id: 'logs', label: 'Logs' },
-    { id: 'ext', label: 'Plugins / Themes' }
+    { id: 'ext', label: 'Plugins / Themes' },
+    { id: 'github', label: 'GitHub' }
   ] as const;
 </script>
 
@@ -212,6 +247,80 @@
             {/each}
           </div>
         </div>
+      </div>
+    {/if}
+  {:else if tab === 'github'}
+    {#if gh === null}
+      <p class="text-sm text-zinc-500">Comprobando gh…</p>
+    {:else if !gh.installed}
+      <p class="text-sm text-amber-500">
+        `gh` no está instalado. Instálalo con <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">sudo pacman -S github-cli</code>.
+      </p>
+    {:else if !gh.authenticated}
+      <p class="text-sm text-amber-500">
+        `gh` no tiene sesión. Ejecuta <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">gh auth login</code> en una terminal.
+      </p>
+    {:else}
+      <div class="mb-4 rounded border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-300">
+        ✓ gh autenticado{gh.user ? ` como @${gh.user}` : ''}
+      </div>
+
+      {#if ghError}
+        <div class="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">{ghError}</div>
+      {/if}
+
+      <!-- Theme -->
+      <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Theme</h3>
+      {#if site.config.github.theme}
+        <div class="mb-4 flex items-center justify-between rounded border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+          <div>
+            <div class="font-medium">{site.config.github.theme.repo}</div>
+            <div class="text-xs text-zinc-500">{site.config.github.theme.path} · {site.config.github.theme.branch}</div>
+          </div>
+          <div class="flex gap-2">
+            <button class="rounded bg-zinc-200 px-2 py-1 text-xs dark:bg-zinc-800" disabled={ghBusy}
+              onclick={() => ghAction(() => api.ghPull(id, site!.config.github.theme!.path, site!.config.github.theme!.branch))}>Pull</button>
+            <button class="rounded px-2 py-1 text-xs text-red-500" disabled={ghBusy}
+              onclick={() => ghAction(() => api.ghRemove(id, 'theme', site!.config.github.theme!.path))}>✕</button>
+          </div>
+        </div>
+      {:else}
+        <div class="mb-4 flex gap-2 text-sm">
+          <input class="flex-1 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" placeholder="owner/mi-theme" bind:value={themeRepo} />
+          <input class="w-24 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" placeholder="branch" bind:value={themeBranch} />
+          <button class="rounded bg-blue-600 px-3 py-1 font-medium text-white disabled:opacity-50" disabled={ghBusy || !themeRepo}
+            onclick={() => ghAction(() => api.ghClone(id, 'theme', themeRepo, themeBranch))}>Clonar</button>
+        </div>
+      {/if}
+
+      <!-- Plugins -->
+      <div class="mb-2 flex items-center justify-between">
+        <h3 class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Plugins</h3>
+        {#if site.config.github.plugins.length > 0}
+          <button class="text-xs text-blue-500 underline" disabled={ghBusy} onclick={() => ghAction(() => api.ghPullAll(id))}>Pull todo</button>
+        {/if}
+      </div>
+      <div class="mb-3 flex flex-col gap-2">
+        {#each site.config.github.plugins as p (p.path)}
+          <div class="flex items-center justify-between rounded border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+            <div>
+              <div class="font-medium">{p.repo}</div>
+              <div class="text-xs text-zinc-500">{p.path} · {p.branch}</div>
+            </div>
+            <div class="flex gap-2">
+              <button class="rounded bg-zinc-200 px-2 py-1 text-xs dark:bg-zinc-800" disabled={ghBusy}
+                onclick={() => ghAction(() => api.ghPull(id, p.path, p.branch))}>Pull</button>
+              <button class="rounded px-2 py-1 text-xs text-red-500" disabled={ghBusy}
+                onclick={() => ghAction(() => api.ghRemove(id, 'plugin', p.path))}>✕</button>
+            </div>
+          </div>
+        {/each}
+      </div>
+      <div class="flex gap-2 text-sm">
+        <input class="flex-1 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" placeholder="owner/mi-plugin" bind:value={pluginRepo} />
+        <input class="w-24 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" placeholder="branch" bind:value={pluginBranch} />
+        <button class="rounded bg-blue-600 px-3 py-1 font-medium text-white disabled:opacity-50" disabled={ghBusy || !pluginRepo}
+          onclick={() => ghAction(() => api.ghClone(id, 'plugin', pluginRepo, pluginBranch).then(() => (pluginRepo = '')))}>Agregar</button>
       </div>
     {/if}
   {/if}

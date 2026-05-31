@@ -93,6 +93,7 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `wpcli.rs` | `run()` WP-CLI dentro del container del proyecto. |
 | `logs.rs` | `spawn_stream`: sigue (`follow`) los logs del container y los emite como evento `log:{id}`. Cancelable vía `JoinHandle::abort()`. |
 | `autologin.rs` | `open_admin`: token efímero (transient WP, 60s, un solo uso) + abre navegador; el mu-plugin `panel-autologin.php` valida y loguea al admin. |
+| `github.rs` | `gh`/`git` en el HOST (no container, los archivos están bind-montados): `status`, `clone`, `pull`, `remove_dir`, `propose_path`. Sin auth propia. |
 
 ## Catálogo de comandos IPC
 
@@ -113,6 +114,11 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `stop_logs` | `id` | `()` | Detiene el stream de logs. |
 | `list_plugins` | `id` | `String` (JSON) | `wp plugin list`. |
 | `list_themes` | `id` | `String` (JSON) | `wp theme list`. |
+| `gh_status` | — | `GhStatus` | gh instalado/autenticado + usuario. |
+| `gh_clone` | `id, kind, repo, branch` | `SiteConfig` | Clona theme/plugin + registra en config.json. |
+| `gh_pull` | `id, path, branch` | `String` | `git pull` de una carpeta. |
+| `gh_pull_all` | `id` | `String` | Pull de theme + todos los plugins. |
+| `gh_remove` | `id, kind, path` | `SiteConfig` | Borra carpeta + desregistra. |
 
 **Eventos** (backend → frontend, vía `app.emit`): `log:{id}` — una línea de log por
 evento. El frontend se suscribe con `listen()` de `@tauri-apps/api/event`. Estado

@@ -49,12 +49,14 @@ Cimientos de la optimización de recursos.
   navegador logueado. Inyectado en `create_site` si `oneClickAdmin`.
 - **Listado de plugins/themes** (`list_plugins`/`list_themes` vía WP-CLI JSON);
   tab "Plugins / Themes" en la vista de proyecto.
-- **Vista de proyecto con tabs** (Info / Logs / Plugins-Themes) + start/stop.
+- **GitHub vía `gh`** (`github.rs` + mu… no, host): clonar/pull/quitar theme y
+  plugins en el host (bind-mount → cambios al instante), estado de `gh`,
+  registro en config.json; tab "GitHub" con UI de theme/plugins y "Pull todo".
+- **Vista de proyecto con tabs** (Info / Logs / Plugins-Themes / GitHub) + start/stop.
 
 ### Pendiente de Fase 2
 - D-Bus (`dbus.rs`) + plasmoid KDE.
-- SSL con mkcert (requiere instalar mkcert).
-- GitHub vía `gh` (`github.rs`): clonar/pull themes y plugins.
+- SSL con mkcert.
 - Grupos de proyectos.
 
 ## Fase 3+ — Pendiente

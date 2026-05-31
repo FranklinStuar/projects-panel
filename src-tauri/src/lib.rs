@@ -4,6 +4,7 @@ mod autologin;
 mod config;
 mod docker;
 mod domain;
+mod github;
 mod logs;
 mod nginx;
 mod php;
@@ -147,6 +148,82 @@ async fn wpcli_json(id: &str, args: &[&str]) -> CmdResult<String> {
     wpcli::run(&docker, &site, &owned).await.map_err(e)
 }
 
+// -- GitHub ------------------------------------------------------------------
+
+#[tauri::command]
+async fn gh_status() -> CmdResult<github::GhStatus> {
+    Ok(github::status().await)
+}
+
+fn load_site(id: &str) -> CmdResult<SiteConfig> {
+    config::find_site(id)
+        .map_err(e)?
+        .ok_or_else(|| format!("proyecto {id} no encontrado"))
+}
+
+/// Clona un repo (kind = "theme" | "plugin") y lo registra en config.json.
+#[tauri::command]
+async fn gh_clone(
+    id: String,
+    kind: String,
+    repo: String,
+    branch: String,
+) -> CmdResult<SiteConfig> {
+    let mut site = load_site(&id)?;
+    let rel_path = github::propose_path(&kind, &repo);
+    github::clone(&site, &repo, &branch, &rel_path)
+        .await
+        .map_err(e)?;
+
+    let entry = config::GithubRepo {
+        repo,
+        branch,
+        path: rel_path,
+    };
+    if kind == "theme" {
+        site.github.theme = Some(entry);
+    } else {
+        site.github.plugins.push(entry);
+    }
+    config::write_site_config(&site).map_err(e)?;
+    Ok(site)
+}
+
+#[tauri::command]
+async fn gh_pull(id: String, path: String, branch: String) -> CmdResult<String> {
+    let site = load_site(&id)?;
+    github::pull(&site, &path, &branch).await.map_err(e)
+}
+
+#[tauri::command]
+async fn gh_pull_all(id: String) -> CmdResult<String> {
+    let site = load_site(&id)?;
+    let mut out = String::new();
+    if let Some(t) = &site.github.theme {
+        out.push_str(&format!("== theme {} ==\n", t.repo));
+        out.push_str(&github::pull(&site, &t.path, &t.branch).await.unwrap_or_else(|err| e(err)));
+    }
+    for p in &site.github.plugins {
+        out.push_str(&format!("\n== plugin {} ==\n", p.repo));
+        out.push_str(&github::pull(&site, &p.path, &p.branch).await.unwrap_or_else(|err| e(err)));
+    }
+    Ok(out)
+}
+
+/// Quita un repo: borra la carpeta y lo desregistra de config.json.
+#[tauri::command]
+async fn gh_remove(id: String, kind: String, path: String) -> CmdResult<SiteConfig> {
+    let mut site = load_site(&id)?;
+    github::remove_dir(&site, &path).map_err(e)?;
+    if kind == "theme" {
+        site.github.theme = None;
+    } else {
+        site.github.plugins.retain(|p| p.path != path);
+    }
+    config::write_site_config(&site).map_err(e)?;
+    Ok(site)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // NOTA: la posición de los botones de la barra de título (deben respetar la
@@ -168,7 +245,12 @@ pub fn run() {
             stream_logs,
             stop_logs,
             list_plugins,
-            list_themes
+            list_themes,
+            gh_status,
+            gh_clone,
+            gh_pull,
+            gh_pull_all,
+            gh_remove
         ])
         .run(tauri::generate_context!())
         .expect("error al arrancar la aplicación Tauri");

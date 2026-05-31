@@ -62,6 +62,12 @@ export interface WpVersion {
   status: string; // "latest" | "outdated" | "insecure"
 }
 
+export interface GhStatus {
+  installed: boolean;
+  authenticated: boolean;
+  user: string | null;
+}
+
 export interface NewSiteRequest {
   name: string;
   domain?: string;
