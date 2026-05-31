@@ -84,6 +84,15 @@ async fn list_wp_versions() -> CmdResult<Vec<WpVersion>> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // En Linux/Wayland (KDE), GTK usa decoración cliente (CSD) por defecto, que
+    // pinta los botones de la ventana a la derecha e ignora la config del usuario.
+    // GTK_CSD=0 hace que GTK pida decoración al servidor (KWin), que sí respeta
+    // kwinrc → los botones aparecen donde el usuario los configure (izq/der).
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("GTK_CSD").is_none() {
+        std::env::set_var("GTK_CSD", "0");
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
