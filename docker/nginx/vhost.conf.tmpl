@@ -1,0 +1,28 @@
+# Plantilla de referencia del vhost por proyecto.
+# El panel la genera dinámicamente en src-tauri/src/nginx.rs (write_vhost) y la
+# escribe en ~/.config/wordpress-panel/nginx/conf.d/{id}.conf, montado en el
+# container panel-nginx. Placeholders:
+#   {{SERVER_NAME}}  dominio .test del proyecto
+#   {{ROOT}}         /srv/projects/{dir}/app/public  (vista de nginx, ro)
+#   {{UPSTREAM}}     wp-{id}:9000                    (php-fpm del proyecto)
+#   {{SSL_BASE}}     /srv/projects/{dir}/ssl
+
+server {
+    listen 80;
+    server_name {{SERVER_NAME}};
+
+    root {{ROOT}};
+    index index.php index.html;
+
+    location / {
+        try_files $uri $uri/ /index.php?$args;
+    }
+
+    location ~ \.php$ {
+        fastcgi_pass {{UPSTREAM}};
+        fastcgi_index index.php;
+        include fastcgi_params;
+        # SCRIPT_FILENAME en la vista del container php, no la de nginx.
+        fastcgi_param SCRIPT_FILENAME /var/www/html$fastcgi_script_name;
+    }
+}
