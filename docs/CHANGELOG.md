@@ -49,15 +49,18 @@ Cimientos de la optimización de recursos.
   navegador logueado. Inyectado en `create_site` si `oneClickAdmin`.
 - **Listado de plugins/themes** (`list_plugins`/`list_themes` vía WP-CLI JSON);
   tab "Plugins / Themes" en la vista de proyecto.
-- **GitHub vía `gh`** (`github.rs` + mu… no, host): clonar/pull/quitar theme y
-  plugins en el host (bind-mount → cambios al instante), estado de `gh`,
+- **GitHub vía `gh`** (`github.rs`): clonar/pull/quitar theme y plugins en el
+  host (bind-mount → cambios al instante), estado de `gh`,
   registro en config.json; tab "GitHub" con UI de theme/plugins y "Pull todo".
+- **SSL con mkcert** (`ssl.rs`): genera cert/key por dominio en creación si
+  SSL activo; comando `regenerate_ssl`; CA local instalada (sistema + NSS
+  navegadores) vía `first-run.sh`. Botón "Regenerar SSL" en Info.
+- **Grupos de proyectos**: `set_site_group` + editor de grupo en Info; el
+  dashboard ya agrupa por `config.group`.
 - **Vista de proyecto con tabs** (Info / Logs / Plugins-Themes / GitHub) + start/stop.
 
 ### Pendiente de Fase 2
-- D-Bus (`dbus.rs`) + plasmoid KDE.
-- SSL con mkcert.
-- Grupos de proyectos.
+- D-Bus (`dbus.rs`) + plasmoid KDE (único item grande restante).
 
 ## Fase 3+ — Pendiente
 

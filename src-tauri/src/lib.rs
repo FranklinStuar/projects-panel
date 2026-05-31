@@ -8,6 +8,7 @@ mod github;
 mod logs;
 mod nginx;
 mod php;
+mod ssl;
 mod wordpress;
 mod wpcli;
 
@@ -155,6 +156,24 @@ async fn gh_status() -> CmdResult<github::GhStatus> {
     Ok(github::status().await)
 }
 
+/// Regenera el certificado SSL del proyecto (mkcert) y recarga nginx.
+#[tauri::command]
+async fn regenerate_ssl(id: String) -> CmdResult<()> {
+    let site = load_site(&id)?;
+    ssl::generate(&site).await.map_err(e)?;
+    let docker = DockerManager::connect().map_err(e)?;
+    docker.reload_nginx().await.map_err(e)
+}
+
+/// Asigna (o quita, con cadena vacía) el grupo de un proyecto.
+#[tauri::command]
+async fn set_site_group(id: String, group: Option<String>) -> CmdResult<SiteConfig> {
+    let mut site = load_site(&id)?;
+    site.group = group.filter(|g| !g.trim().is_empty());
+    config::write_site_config(&site).map_err(e)?;
+    Ok(site)
+}
+
 fn load_site(id: &str) -> CmdResult<SiteConfig> {
     config::find_site(id)
         .map_err(e)?
@@ -250,7 +269,9 @@ pub fn run() {
             gh_clone,
             gh_pull,
             gh_pull_all,
-            gh_remove
+            gh_remove,
+            regenerate_ssl,
+            set_site_group
         ])
         .run(tauri::generate_context!())
         .expect("error al arrancar la aplicación Tauri");

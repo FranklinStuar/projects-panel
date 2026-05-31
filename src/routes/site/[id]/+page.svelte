@@ -34,6 +34,16 @@
     }
   }
 
+  async function act(fn: () => Promise<unknown>) {
+    error = null;
+    try {
+      await fn();
+      await load();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   async function openAdmin() {
     error = null;
     try {
@@ -206,6 +216,28 @@
       <dt class="text-zinc-500">Ruta</dt>
       <dd class="truncate">{site.config.path}</dd>
     </dl>
+
+    <div class="mt-6 flex flex-wrap items-end gap-3 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+      <label class="flex flex-col gap-1 text-sm">
+        <span class="text-zinc-500">Grupo</span>
+        <div class="flex gap-2">
+          <input
+            class="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900"
+            placeholder="Sin grupo"
+            value={site.config.group ?? ''}
+            onchange={(ev) => act(() => api.setSiteGroup(id, (ev.target as HTMLInputElement).value))}
+          />
+        </div>
+      </label>
+      {#if site.config.services.nginx.ssl}
+        <button
+          class="rounded bg-zinc-200 px-3 py-1.5 text-sm dark:bg-zinc-800"
+          onclick={() => act(() => api.regenerateSsl(id))}
+        >
+          Regenerar SSL
+        </button>
+      {/if}
+    </div>
   {:else if tab === 'logs'}
     {#if site.status !== 'running'}
       <p class="text-sm text-zinc-500">Enciende el proyecto para ver logs en vivo.</p>

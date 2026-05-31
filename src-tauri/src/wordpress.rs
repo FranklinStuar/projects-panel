@@ -160,10 +160,15 @@ pub async fn create_site(docker: &DockerManager, req: NewSiteRequest) -> Result<
         inject_autologin_muplugin(&site)?;
     }
 
-    // 7. encender container php + vhost + nginx
+    // 7. SSL: generar certificado antes de levantar nginx (el vhost lo referencia)
+    if site.services.nginx.ssl {
+        crate::ssl::generate(&site).await?;
+    }
+
+    // 8. encender container php + vhost + nginx
     docker.start_site(&site).await?;
 
-    // 8. wp-config + core install vía WP-CLI
+    // 9. wp-config + core install vía WP-CLI
     wp_config_create(docker, &site, &db_container).await?;
     wp_core_install(docker, &site, &req).await?;
 

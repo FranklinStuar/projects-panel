@@ -23,5 +23,8 @@ export const api = {
     invoke<string>('gh_pull', { id, path, branch }),
   ghPullAll: (id: string) => invoke<string>('gh_pull_all', { id }),
   ghRemove: (id: string, kind: 'theme' | 'plugin', path: string) =>
-    invoke<SiteConfig>('gh_remove', { id, kind, path })
+    invoke<SiteConfig>('gh_remove', { id, kind, path }),
+  regenerateSsl: (id: string) => invoke<void>('regenerate_ssl', { id }),
+  setSiteGroup: (id: string, group: string | null) =>
+    invoke<SiteConfig>('set_site_group', { id, group })
 };

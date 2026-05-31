@@ -94,6 +94,7 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `logs.rs` | `spawn_stream`: sigue (`follow`) los logs del container y los emite como evento `log:{id}`. Cancelable vía `JoinHandle::abort()`. |
 | `autologin.rs` | `open_admin`: token efímero (transient WP, 60s, un solo uso) + abre navegador; el mu-plugin `panel-autologin.php` valida y loguea al admin. |
 | `github.rs` | `gh`/`git` en el HOST (no container, los archivos están bind-montados): `status`, `clone`, `pull`, `remove_dir`, `propose_path`. Sin auth propia. |
+| `ssl.rs` | `generate`: cert/key por dominio con mkcert en `ssl/` del proyecto. La CA local (`mkcert -install`) se hace una vez en `first-run.sh`. |
 
 ## Catálogo de comandos IPC
 
@@ -119,6 +120,8 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `gh_pull` | `id, path, branch` | `String` | `git pull` de una carpeta. |
 | `gh_pull_all` | `id` | `String` | Pull de theme + todos los plugins. |
 | `gh_remove` | `id, kind, path` | `SiteConfig` | Borra carpeta + desregistra. |
+| `regenerate_ssl` | `id` | `()` | Regenera cert mkcert + reload nginx. |
+| `set_site_group` | `id, group?` | `SiteConfig` | Asigna/quita grupo del proyecto. |
 
 **Eventos** (backend → frontend, vía `app.emit`): `log:{id}` — una línea de log por
 evento. El frontend se suscribe con `listen()` de `@tauri-apps/api/event`. Estado
