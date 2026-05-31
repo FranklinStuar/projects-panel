@@ -2,12 +2,17 @@
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
   import type { SiteState, Endpoint } from '$lib/types';
+  import OpConsole from '$lib/components/OpConsole.svelte';
 
   let sites = $state<SiteState[]>([]);
   let endpoint = $state<Endpoint | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let busy = $state<Record<string, boolean>>({});
+
+  // Consola de progreso de migración.
+  let consoleOpen = $state(false);
+  let migrating = $state(false);
 
   // Etiqueta de host con puerto solo si el panel publica en uno alterno.
   function hostLabel(s: SiteState): string {
@@ -42,11 +47,28 @@
     }
   }
 
+  async function cancelImport(s: SiteState) {
+    if (!confirm(`Cancelar la importación de "${s.config.name}"? Se borrará su carpeta:\n${s.config.path}`))
+      return;
+    busy = { ...busy, [s.config.id]: true };
+    error = null;
+    try {
+      await api.deleteSite(s.config.id);
+      await load();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = { ...busy, [s.config.id]: false };
+    }
+  }
+
   async function migrate(s: SiteState) {
     if (!confirm(`Migrar "${s.config.name}" a este sistema (crear DB, importar dump, regenerar SSL) y encender?`))
       return;
     busy = { ...busy, [s.config.id]: true };
     error = null;
+    consoleOpen = true;
+    migrating = true;
     try {
       const r = await api.migrateSite(s.config.id);
       if (r.note) error = r.note; // aviso informativo (p. ej. sin dump)
@@ -55,6 +77,7 @@
       error = String(e);
     } finally {
       busy = { ...busy, [s.config.id]: false };
+      migrating = false;
     }
   }
 
@@ -123,13 +146,22 @@
               </span>
             </div>
             {#if s.status === 'migrationPending'}
-              <button
-                class="rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-                disabled={busy[s.config.id]}
-                onclick={() => migrate(s)}
-              >
-                {busy[s.config.id] ? '…' : 'Migrar y encender'}
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  class="rounded px-3 py-1.5 text-sm text-zinc-400 hover:text-red-400 disabled:opacity-50"
+                  disabled={busy[s.config.id]}
+                  onclick={() => cancelImport(s)}
+                >
+                  Cancelar
+                </button>
+                <button
+                  class="rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                  disabled={busy[s.config.id]}
+                  onclick={() => migrate(s)}
+                >
+                  {busy[s.config.id] ? '…' : 'Migrar y encender'}
+                </button>
+              </div>
             {:else}
               <button
                 class="rounded px-3 py-1.5 text-sm font-medium"
@@ -149,3 +181,5 @@
     </section>
   {/each}
 {/if}
+
+<OpConsole open={consoleOpen} running={migrating} title="Migración" onClose={() => (consoleOpen = false)} />

@@ -10,9 +10,11 @@ use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use tauri::AppHandle;
 
 use crate::config::{write_site_config, SiteConfig};
 use crate::docker::DockerManager;
+use crate::progress::log;
 
 /// Resultado de migrar: la config actualizada + un aviso opcional para la UI
 /// (p. ej. "no había dump").
@@ -23,7 +25,12 @@ pub struct Migration {
     pub note: Option<String>,
 }
 
-pub async fn migrate_site(docker: &DockerManager, site: &SiteConfig) -> Result<Migration> {
+pub async fn migrate_site(
+    app: &AppHandle,
+    docker: &DockerManager,
+    site: &SiteConfig,
+) -> Result<Migration> {
+    log(app, format!("▶ Migrando «{}»…", site.name));
     if !site.public_dir().exists() {
         return Err(anyhow!(
             "falta {:?}: la carpeta del proyecto está incompleta",
@@ -32,6 +39,7 @@ pub async fn migrate_site(docker: &DockerManager, site: &SiteConfig) -> Result<M
     }
 
     // 1. DB compartida on-demand + base de datos vacía del proyecto (idempotente).
+    log(app, "• Arrancando base de datos y creando el esquema…");
     let db_container = docker.ensure_db(&site.services.db).await?;
     crate::wordpress::create_database(docker, &db_container, site).await?;
 
@@ -39,28 +47,38 @@ pub async fn migrate_site(docker: &DockerManager, site: &SiteConfig) -> Result<M
     //    panel-nginx lo referencia y `nginx -s reload` falla si no existe (la CA
     //    de mkcert es local; se regenera en cada sistema).
     if site.services.nginx.ssl {
+        log(app, "• Generando certificado SSL (mkcert)…");
         crate::ssl::generate(site).await?;
     }
 
     // 3. Encender container php + vhost en panel-nginx + reload.
+    log(
+        app,
+        "• Encendiendo el proyecto (la primera vez puede construir la imagen PHP, tarda)…",
+    );
     docker.start_site(site).await?;
 
     // 4. Regenerar wp-config con las credenciales del panel: el origen pudo usar
     //    otro host/disco (otra instalación del panel, o LocalWP).
+    log(app, "• Regenerando wp-config.php…");
     crate::wordpress::wp_config_create(docker, site, &db_container).await?;
 
     // 5. Importar el último dump si existe; si no, el sitio arranca vacío.
     let note = match latest_dump(site) {
         Some(dump) => {
+            let mb = std::fs::metadata(&dump).map(|m| m.len() / 1_048_576).unwrap_or(0);
+            log(app, format!("• Importando base de datos ({mb} MB), espera…"));
             import_dump(docker, site, &db_container, &dump).await?;
             // El dump pudo venir con otro dominio (p. ej. LocalWP `.local`):
             // fijar home/siteurl al dominio del panel para que el admin funcione.
+            log(app, "• Ajustando URLs del sitio…");
             fix_site_url(docker, site).await.ok();
             None
         }
-        None => Some(
-            "No había dump en app/sql/: el sitio arranca con la base de datos vacía.".to_string(),
-        ),
+        None => {
+            log(app, "• No hay dump: el sitio arranca con la DB vacía.");
+            Some("No había dump en app/sql/: el sitio arranca con la base de datos vacía.".to_string())
+        }
     };
 
     // 6. Marcar como migrado.
@@ -69,6 +87,7 @@ pub async fn migrate_site(docker: &DockerManager, site: &SiteConfig) -> Result<M
     updated.last_migrated_at = Some(Utc::now().to_rfc3339());
     write_site_config(&updated)?;
 
+    log(app, format!("✓ «{}» migrado y encendido.", site.name));
     Ok(Migration {
         site: updated,
         note,

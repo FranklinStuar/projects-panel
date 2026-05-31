@@ -28,6 +28,7 @@ export const api = {
   createPanelNetwork: () => invoke<void>('create_panel_network'),
   resetEndpoint: () => invoke<void>('reset_endpoint'),
   migrateSite: (id: string) => invoke<Migration>('migrate_site', { id }),
+  deleteSite: (id: string) => invoke<void>('delete_site', { id }),
   listLocalwpSites: () => invoke<LocalSite[]>('list_localwp_sites'),
   importLocalwpSite: (id: string) => invoke<ImportResult>('import_localwp_site', { id }),
   openAdmin: (id: string) => invoke<void>('open_admin', { id }),

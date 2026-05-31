@@ -11,12 +11,14 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use tauri::AppHandle;
 use uuid::Uuid;
 
 use crate::config::{
     write_site_config, DbService, DbType, GithubConfig, NginxService, PhpService, Services,
     SiteConfig,
 };
+use crate::progress::log;
 
 /// Versiones soportadas por el panel (ver `PLAN.md`). Si la de LocalWP no está,
 /// se usa la más reciente y se avisa.
@@ -131,11 +133,12 @@ pub fn list_sites() -> Result<Vec<LocalSite>> {
 }
 
 /// Importa un sitio de LocalWP creando un proyecto del panel (sin DB todavía).
-pub fn import_site(local_id: &str) -> Result<ImportResult> {
+pub fn import_site(app: &AppHandle, local_id: &str) -> Result<ImportResult> {
     let map = read_raw()?;
     let r = map
         .get(local_id)
         .ok_or_else(|| anyhow!("sitio LocalWP no encontrado: {local_id}"))?;
+    log(app, format!("▶ Importando «{}» desde LocalWP…", r.name));
 
     let src = PathBuf::from(expand_tilde(&r.path));
     let src_public = src.join("app").join("public");
@@ -186,12 +189,15 @@ pub fn import_site(local_id: &str) -> Result<ImportResult> {
     // Estructura + copia de archivos.
     crate::wordpress::create_dirs(&site)?;
     crate::wordpress::write_php_ini(&site)?;
+    log(app, "• Copiando archivos (app/public, puede tardar)…");
     cp_contents(&src_public, &site.public_dir())?;
 
     // Dump: LocalWP guarda `app/sql/local.sql`.
     let mut note = String::new();
     let src_sql = src.join("app").join("sql").join("local.sql");
     if src_sql.exists() {
+        let mb = std::fs::metadata(&src_sql).map(|m| m.len() / 1_048_576).unwrap_or(0);
+        log(app, format!("• Copiando dump de la base de datos ({mb} MB)…"));
         std::fs::copy(&src_sql, site.sql_dir().join("imported.sql"))
             .context("copiando el dump de LocalWP")?;
     } else {
@@ -219,6 +225,10 @@ pub fn import_site(local_id: &str) -> Result<ImportResult> {
 
     write_site_config(&site)?;
 
+    log(
+        app,
+        format!("✓ «{}» importado → usa «Migrar y encender» en Proyectos.", site.name),
+    );
     Ok(ImportResult {
         site,
         note: (!note.is_empty()).then_some(note.trim().to_string()),

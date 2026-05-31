@@ -2,8 +2,10 @@
   import { onMount, onDestroy } from 'svelte';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { page } from '$app/state';
+  import { goto } from '$app/navigation';
   import { api } from '$lib/api';
   import type { SiteState, GhStatus, Endpoint } from '$lib/types';
+  import OpConsole from '$lib/components/OpConsole.svelte';
 
   let site = $state<SiteState | null>(null);
   let endpoint = $state<Endpoint | null>(null);
@@ -11,6 +13,8 @@
   let tab = $state<'info' | 'logs' | 'ext' | 'github' | 'svc'>('info');
   let error = $state<string | null>(null);
   let busy = $state(false);
+  let consoleOpen = $state(false);
+  let migrating = $state(false);
 
   const id = page.params.id;
 
@@ -51,6 +55,8 @@
       return;
     busy = true;
     error = null;
+    consoleOpen = true;
+    migrating = true;
     try {
       const r = await api.migrateSite(id);
       if (r.note) error = r.note;
@@ -58,6 +64,22 @@
     } catch (e) {
       error = String(e);
     } finally {
+      busy = false;
+      migrating = false;
+    }
+  }
+
+  async function cancelImport() {
+    if (!site) return;
+    if (!confirm(`Cancelar la importación de "${site.config.name}"? Se borrará su carpeta:\n${site.config.path}`))
+      return;
+    busy = true;
+    error = null;
+    try {
+      await api.deleteSite(id);
+      await goto('/');
+    } catch (e) {
+      error = String(e);
       busy = false;
     }
   }
@@ -211,6 +233,13 @@
     </div>
     <div class="flex items-center gap-2">
       {#if site.status === 'migrationPending'}
+        <button
+          class="rounded px-3 py-1.5 text-sm text-zinc-400 hover:text-red-400 disabled:opacity-50"
+          disabled={busy}
+          onclick={cancelImport}
+        >
+          Cancelar
+        </button>
         <button
           class="rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
           disabled={busy}
@@ -471,3 +500,5 @@
 {:else}
   <p class="text-sm text-zinc-500">Cargando…</p>
 {/if}
+
+<OpConsole open={consoleOpen} running={migrating} title="Migración" onClose={() => (consoleOpen = false)} />

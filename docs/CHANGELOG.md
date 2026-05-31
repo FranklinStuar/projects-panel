@@ -245,6 +245,19 @@ El vhost referencia `ssl/cert.pem`; `migrate_site` encendía el sitio (escribe
 vhost + `nginx -s reload`) antes de generar el cert → reload fallaba. Reordenado:
 `ssl::generate` antes de `start_site`, igual que `create_site`.
 
+### Consola de progreso + cancelar importación
+
+- **Consola en vivo**: operaciones largas (migración, import LocalWP) parecían
+  colgadas (reconstrucción de imagen php, copia de archivos, dump de 100&nbsp;MB).
+  `progress.rs` (nuevo) emite líneas de paso en el evento `op-log`; el componente
+  `OpConsole.svelte` las muestra en un modal en vivo (autoscroll, "Cerrar"
+  deshabilitado mientras corre). `migrate_site`/`import_localwp_site` reciben
+  `AppHandle` y reportan cada paso.
+- **Cancelar importación**: botón "Cancelar" junto a "Migrar y encender" en
+  proyectos `migrationPending` (dashboard y vista de proyecto) → comando
+  `delete_site` (apaga + quita container/vhost + borra la carpeta). Para deshacer
+  una importación del proyecto equivocado.
+
 **Fase 4 completa.** Falta solo Fase 5 (asistente IA, `agent.rs`).
 
 ## Fase 4+ — Pendiente

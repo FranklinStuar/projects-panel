@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
   import type { SystemStatus, LocalSite } from '$lib/types';
+  import OpConsole from '$lib/components/OpConsole.svelte';
 
   let status = $state<SystemStatus | null>(null);
   let loading = $state(true);
@@ -13,6 +14,8 @@
   let localSites = $state<LocalSite[]>([]);
   let localError = $state<string | null>(null);
   let importing = $state<Record<string, boolean>>({});
+  let consoleOpen = $state(false);
+  let consoleRunning = $state(false);
 
   async function load() {
     try {
@@ -37,6 +40,8 @@
     importing = { ...importing, [s.id]: true };
     err = null;
     msg = null;
+    consoleOpen = true;
+    consoleRunning = true;
     try {
       const r = await api.importLocalwpSite(s.id);
       msg = `Importado "${r.site.name}" → ${r.site.domain}. ${r.note ?? ''} Usa "Migrar y encender" en Proyectos.`;
@@ -45,6 +50,7 @@
       err = String(e);
     } finally {
       importing = { ...importing, [s.id]: false };
+      consoleRunning = false;
     }
   }
 
@@ -229,3 +235,5 @@
     {/if}
   </section>
 {/if}
+
+<OpConsole open={consoleOpen} running={consoleRunning} title="Importar desde LocalWP" onClose={() => (consoleOpen = false)} />

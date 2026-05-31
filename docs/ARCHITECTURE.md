@@ -91,6 +91,7 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `domain.rs` | dnsmasq wildcard `*.test`: snippet + detección de resolución (`resolves_to`). Regla parametrizada por IP (`wildcard_rule`); `install_wildcard` la instala vía `pkexec` y recarga NetworkManager (para endpoint con IP loopback alterna). |
 | `migrate.rs` | `migrate_site()`: provisiona un proyecto `migrationPending` en el sistema actual (crea DB, regenera wp-config, importa el último dump de `app/sql/`, fija `home`/`siteurl`, regenera SSL) y lo enciende. Devuelve config + aviso opcional. |
 | `localwp.rs` | Importa sitios de LocalWP: `list_sites()` (parsea `~/.config/Local/sites.json`), `import_site()` (copia `app/public` + dump, crea `config.json` `migrationPending`). |
+| `progress.rs` | `log(app, msg)`: emite líneas de progreso en el evento `op-log` para operaciones largas (migración, import); el frontend las muestra en `OpConsole.svelte`. |
 | `system.rs` | `status()`: estado de prerequisitos para la pantalla de configuración (Docker, red `panel-net`, dnsmasq, CA mkcert, wrappers WP-CLI, plasmoid) + endpoint y rutas. |
 | `netcheck.rs` | Lee `/proc/net/tcp{,6}` para clasificar puertos del host: `Free`/`Wildcard`/`Specific(IPs)`. Selectores `pick_loopback_ip`/`pick_alt_port` y `holder_name` (proceso que ocupa un puerto). Base de la selección de endpoint de `docker.rs`. |
 | `wordpress.rs` | `create_site` end-to-end, `download_core` (tarball), `fetch_versions` (API wp.org, cache 24h), DB/wp-config/install vía WP-CLI, mu-plugin mailpit. |
@@ -121,7 +122,8 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `system_status` | — | `SystemStatus` | Estado de prerequisitos (Docker, red, dnsmasq, mkcert, wrappers, plasmoid) + endpoint y rutas. |
 | `create_panel_network` | — | `()` | Crea el bridge `panel-net` si falta. |
 | `reset_endpoint` | — | `()` | Olvida el endpoint persistido (reasigna puerto al próximo arranque). |
-| `migrate_site` | `id` | `Migration` | Migra un proyecto pendiente (DB + dump + SSL) y lo enciende. |
+| `migrate_site` | `id` | `Migration` | Migra un proyecto pendiente (DB + dump + SSL) y lo enciende. Emite `op-log`. |
+| `delete_site` | `id` | `()` | Borra un proyecto (apaga + container/vhost + carpeta). Cancela una importación. |
 | `list_localwp_sites` | — | `Vec<LocalSite>` | Sitios de LocalWP candidatos a importar. |
 | `import_localwp_site` | `id` | `ImportResult` | Importa un sitio de LocalWP (queda `migrationPending`). |
 | `open_admin` | `id` | `()` | Abre el admin en el navegador (auto-login si está activo). |
@@ -143,8 +145,9 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `open_minio` | — | `()` | Abre la consola de MinIO. |
 | `feature_stub` | `feature` | `String` (Err) | Stub Cloudflare/deploy/package (fase posterior). |
 
-**Eventos** (backend → frontend, vía `app.emit`): `log:{id}` — una línea de log por
-evento. El frontend se suscribe con `listen()` de `@tauri-apps/api/event`. Estado
+**Eventos** (backend → frontend, vía `app.emit`): `log:{id}` — una línea de log de
+container por evento; `op-log` — línea de progreso de una operación larga
+(migración/import), mostrada en `OpConsole.svelte`. El frontend se suscribe con `listen()` de `@tauri-apps/api/event`. Estado
 de los streams activos en `LogStreams` (managed state, `Mutex<HashMap>`).
 
 ## D-Bus (plasmoid KDE)

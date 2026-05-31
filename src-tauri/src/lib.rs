@@ -14,6 +14,7 @@ mod migrate;
 mod netcheck;
 mod nginx;
 mod php;
+mod progress;
 mod ssl;
 mod system;
 mod wordpress;
@@ -135,10 +136,31 @@ fn reset_endpoint() -> CmdResult<()> {
 /// Migra un proyecto pendiente al sistema actual (crea DB, importa dump, SSL) y
 /// lo enciende. Devuelve la config actualizada + un aviso opcional.
 #[tauri::command]
-async fn migrate_site(id: String) -> CmdResult<migrate::Migration> {
+async fn migrate_site(app: AppHandle, id: String) -> CmdResult<migrate::Migration> {
     let site = load_site(&id)?;
     let docker = DockerManager::connect().map_err(e)?;
-    migrate::migrate_site(&docker, &site).await.map_err(e)
+    migrate::migrate_site(&app, &docker, &site).await.map_err(e)
+}
+
+/// Borra un proyecto: lo apaga (si corre), quita su container y vhost, y elimina
+/// su carpeta de `~/panel-wp/`. Pensado para cancelar una importación con el
+/// proyecto equivocado (aún sin migrar), pero sirve para cualquier proyecto.
+#[tauri::command]
+async fn delete_site(id: String) -> CmdResult<()> {
+    let all = config::load_all_sites().map_err(e)?;
+    let site = all
+        .iter()
+        .find(|s| s.id == id)
+        .cloned()
+        .ok_or_else(|| format!("proyecto {id} no encontrado"))?;
+    let docker = DockerManager::connect().map_err(e)?;
+    // Apaga + quita vhost + teardown de compartidos (no-op si está pendiente).
+    docker.stop_site(&site, &all).await.ok();
+    // Asegura que no quede el container php creado.
+    docker.remove_container(&site.container_name()).await.ok();
+    // Borra la carpeta del proyecto (fuente de verdad).
+    std::fs::remove_dir_all(&site.path).map_err(e)?;
+    Ok(())
 }
 
 /// Lista los sitios de LocalWP candidatos a importar.
@@ -149,8 +171,8 @@ fn list_localwp_sites() -> CmdResult<Vec<localwp::LocalSite>> {
 
 /// Importa un sitio de LocalWP como proyecto del panel (queda `migrationPending`).
 #[tauri::command]
-fn import_localwp_site(id: String) -> CmdResult<localwp::ImportResult> {
-    localwp::import_site(&id).map_err(e)
+async fn import_localwp_site(app: AppHandle, id: String) -> CmdResult<localwp::ImportResult> {
+    localwp::import_site(&app, &id).map_err(e)
 }
 
 /// Abre el admin en el navegador (auto-login si el proyecto lo tiene activado).
@@ -405,6 +427,7 @@ pub fn run() {
             create_panel_network,
             reset_endpoint,
             migrate_site,
+            delete_site,
             list_localwp_sites,
             import_localwp_site,
             open_admin,
