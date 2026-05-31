@@ -42,6 +42,22 @@
     }
   }
 
+  async function migrate(s: SiteState) {
+    if (!confirm(`Migrar "${s.config.name}" a este sistema (crear DB, importar dump, regenerar SSL) y encender?`))
+      return;
+    busy = { ...busy, [s.config.id]: true };
+    error = null;
+    try {
+      const r = await api.migrateSite(s.config.id);
+      if (r.note) error = r.note; // aviso informativo (p. ej. sin dump)
+      await load();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = { ...busy, [s.config.id]: false };
+    }
+  }
+
   // Agrupar por grupo (null = "Sin grupo")
   let groups = $derived.by(() => {
     const map = new Map<string, SiteState[]>();
@@ -107,7 +123,13 @@
               </span>
             </div>
             {#if s.status === 'migrationPending'}
-              <span class="text-xs text-amber-500">Pendiente de migración</span>
+              <button
+                class="rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                disabled={busy[s.config.id]}
+                onclick={() => migrate(s)}
+              >
+                {busy[s.config.id] ? '…' : 'Migrar y encender'}
+              </button>
             {:else}
               <button
                 class="rounded px-3 py-1.5 text-sm font-medium"

@@ -241,7 +241,8 @@ pub async fn download_core(version: &str, public: &Path) -> Result<()> {
 }
 
 /// Crea la base de datos vacía dentro del container DB compartido.
-async fn create_database(
+/// `IF NOT EXISTS` la hace idempotente (la reusa la migración, `migrate.rs`).
+pub(crate) async fn create_database(
     docker: &DockerManager,
     db_container: &str,
     site: &SiteConfig,
@@ -273,7 +274,9 @@ async fn create_database(
     Ok(())
 }
 
-async fn wp_config_create(
+/// Genera `wp-config.php` con las credenciales del panel (`--force` lo reescribe).
+/// Lo reusa la migración para repuntar un proyecto traído de otro sistema.
+pub(crate) async fn wp_config_create(
     docker: &DockerManager,
     site: &SiteConfig,
     db_container: &str,

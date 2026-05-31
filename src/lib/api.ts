@@ -6,7 +6,8 @@ import type {
   NewSiteRequest,
   GhStatus,
   Endpoint,
-  SystemStatus
+  SystemStatus,
+  Migration
 } from './types';
 
 // Capa fina sobre los comandos IPC de Tauri (src-tauri/src/lib.rs).
@@ -24,6 +25,7 @@ export const api = {
   systemStatus: () => invoke<SystemStatus>('system_status'),
   createPanelNetwork: () => invoke<void>('create_panel_network'),
   resetEndpoint: () => invoke<void>('reset_endpoint'),
+  migrateSite: (id: string) => invoke<Migration>('migrate_site', { id }),
   openAdmin: (id: string) => invoke<void>('open_admin', { id }),
   streamLogs: (id: string) => invoke<void>('stream_logs', { id }),
   stopLogs: (id: string) => invoke<void>('stop_logs', { id }),

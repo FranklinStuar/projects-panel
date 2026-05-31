@@ -79,6 +79,12 @@ export interface SystemStatus {
   configDir: string;
 }
 
+/// Espejo de `migrate::Migration`: config migrada + aviso opcional.
+export interface Migration {
+  site: SiteConfig;
+  note: string | null;
+}
+
 export type SiteStatus = 'running' | 'stopped' | 'migrationPending';
 
 export interface SiteState {

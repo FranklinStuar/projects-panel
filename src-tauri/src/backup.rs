@@ -47,3 +47,28 @@ pub async fn export_db(docker: &DockerManager, site: &SiteConfig) -> Result<Stri
 
     Ok(dest.to_string_lossy().to_string())
 }
+
+/// Mantiene solo los `keep` dumps `db-*.sql` más recientes en `app/sql/` (rota
+/// los del export-al-detener). No toca otros `.sql` (p. ej. `imported.sql`).
+pub fn rotate_dumps(site: &SiteConfig, keep: usize) -> Result<()> {
+    let dir = site.sql_dir();
+    let mut dumps: Vec<(std::time::SystemTime, std::path::PathBuf)> = Vec::new();
+    for entry in std::fs::read_dir(&dir)?.flatten() {
+        let path = entry.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if !(name.starts_with("db-") && name.ends_with(".sql")) {
+            continue;
+        }
+        if let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) {
+            dumps.push((mtime, path));
+        }
+    }
+    if dumps.len() <= keep {
+        return Ok(());
+    }
+    dumps.sort_by(|a, b| b.0.cmp(&a.0)); // más nuevo primero
+    for (_, path) in dumps.into_iter().skip(keep) {
+        std::fs::remove_file(&path).ok();
+    }
+    Ok(())
+}

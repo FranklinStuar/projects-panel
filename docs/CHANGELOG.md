@@ -177,6 +177,27 @@ así `create_site` devolvía Ok:
   mkcert CA, plasmoid) remiten a `bash scripts/first-run.sh`. Muestra el endpoint
   (badge URLs limpias / puerto alterno) con botón "Reasignar puerto", y las rutas.
 
+### Migración entre sistemas + export automático al detener
+
+El modelo ya tenía `migrationPending`/`lastMigratedAt` y el dashboard pintaba el
+estado, pero no había forma de migrar ni de exportar la DB al apagar.
+
+- **`migrate.rs`** (nuevo): `migrate_site()` provisiona un proyecto pendiente en
+  el sistema actual → crea la base de datos (idempotente), enciende php+vhost,
+  **regenera `wp-config.php`** con las credenciales del panel (el origen pudo
+  usar otro host/disco/LocalWP), importa el último dump de `app/sql/` y regenera
+  el certificado SSL. Devuelve la config + un aviso opcional (p. ej. "sin dump").
+  El dump se importa copiándolo a la raíz pública (montada) porque `app/sql/` no
+  está bind-montado en el container. Reusa `create_database`/`wp_config_create`
+  de `wordpress.rs` (ahora `pub(crate)`).
+- **Comando** `migrate_site(id) -> Migration`. Botón **Migrar y encender**
+  (ámbar) en el dashboard y en la vista de proyecto, reemplazando el texto
+  estático "Pendiente de migración".
+- **Export-al-detener**: `stop_site` (docker.rs) ahora exporta la DB y rota
+  dumps **antes** de apagar el container (best-effort, no bloquea el stop).
+  `backup::rotate_dumps(site, 3)` deja solo los 3 `db-*.sql` más recientes (no
+  toca otros `.sql` como `imported.sql`).
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).

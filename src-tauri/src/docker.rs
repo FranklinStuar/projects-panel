@@ -589,6 +589,10 @@ impl DockerManager {
     pub async fn stop_site(&self, site: &SiteConfig, others: &[SiteConfig]) -> Result<()> {
         let cname = site.container_name();
         if self.is_running(&cname).await {
+            // Export-al-detener: deja un dump fresco en app/sql/ (migración +
+            // protección de datos) antes de apagar. Best-effort: no bloquea el stop.
+            crate::backup::export_db(self, site).await.ok();
+            crate::backup::rotate_dumps(site, 3).ok();
             self.docker
                 .stop_container(&cname, Some(StopContainerOptions { t: 10 }))
                 .await

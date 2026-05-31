@@ -45,6 +45,23 @@
     }
   }
 
+  async function migrate() {
+    if (!site) return;
+    if (!confirm(`Migrar "${site.config.name}" a este sistema (crear DB, importar dump, regenerar SSL) y encender?`))
+      return;
+    busy = true;
+    error = null;
+    try {
+      const r = await api.migrateSite(id);
+      if (r.note) error = r.note;
+      await load();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = false;
+    }
+  }
+
   async function act(fn: () => Promise<unknown>) {
     error = null;
     try {
@@ -193,22 +210,32 @@
       <p class="text-sm text-zinc-500">{hostLabel(site)}</p>
     </div>
     <div class="flex items-center gap-2">
-      {#if site.status === 'running'}
-        <button class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500" onclick={openAdmin}>
-          Abrir admin
+      {#if site.status === 'migrationPending'}
+        <button
+          class="rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          disabled={busy}
+          onclick={migrate}
+        >
+          {busy ? '…' : 'Migrar y encender'}
+        </button>
+      {:else}
+        {#if site.status === 'running'}
+          <button class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500" onclick={openAdmin}>
+            Abrir admin
+          </button>
+        {/if}
+        <button
+          class="rounded px-3 py-1.5 text-sm font-medium"
+          class:bg-green-600={site.status !== 'running'}
+          class:text-white={site.status !== 'running'}
+          class:bg-zinc-200={site.status === 'running'}
+          class:dark:bg-zinc-800={site.status === 'running'}
+          disabled={busy}
+          onclick={toggle}
+        >
+          {busy ? '…' : site.status === 'running' ? 'Detener' : 'Encender'}
         </button>
       {/if}
-      <button
-        class="rounded px-3 py-1.5 text-sm font-medium"
-        class:bg-green-600={site.status !== 'running'}
-        class:text-white={site.status !== 'running'}
-        class:bg-zinc-200={site.status === 'running'}
-        class:dark:bg-zinc-800={site.status === 'running'}
-        disabled={busy}
-        onclick={toggle}
-      >
-        {busy ? '…' : site.status === 'running' ? 'Detener' : 'Encender'}
-      </button>
     </div>
   </div>
 

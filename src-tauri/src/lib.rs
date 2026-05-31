@@ -9,6 +9,7 @@ mod docker;
 mod domain;
 mod github;
 mod logs;
+mod migrate;
 mod netcheck;
 mod nginx;
 mod php;
@@ -128,6 +129,15 @@ async fn create_panel_network() -> CmdResult<()> {
 #[tauri::command]
 fn reset_endpoint() -> CmdResult<()> {
     config::clear_endpoint().map_err(e)
+}
+
+/// Migra un proyecto pendiente al sistema actual (crea DB, importa dump, SSL) y
+/// lo enciende. Devuelve la config actualizada + un aviso opcional.
+#[tauri::command]
+async fn migrate_site(id: String) -> CmdResult<migrate::Migration> {
+    let site = load_site(&id)?;
+    let docker = DockerManager::connect().map_err(e)?;
+    migrate::migrate_site(&docker, &site).await.map_err(e)
 }
 
 /// Abre el admin en el navegador (auto-login si el proyecto lo tiene activado).
@@ -381,6 +391,7 @@ pub fn run() {
             system_status,
             create_panel_network,
             reset_endpoint,
+            migrate_site,
             open_admin,
             stream_logs,
             stop_logs,
