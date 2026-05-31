@@ -46,8 +46,8 @@ Materializa el principio rector (ver `CLAUDE.md`).
 | `panel-mysql-{ver}` | `mysql:{ver}` | 1 por versión (`panel-mysql-80`, `panel-mysql-84`). Root pass `panel`, `MYSQL_ROOT_HOST=%`. |
 | `panel-mariadb-{ver}` | `mariadb:{ver}` | idem (sin alpine: no existe). |
 | `panel-postgres-{ver}` | `postgres:{ver}-alpine` | idem. |
-| `panel-mailpit` | `axllent/mailpit` | (planificado) captura de correo. |
-| `panel-minio` | `minio/minio` | (planificado) S3 sim. |
+| `panel-mailpit` | `axllent/mailpit` | Captura de correo de todos los activos. UI host `127.0.0.1:8025`, SMTP `:1025` interno. Arranca con cualquier proyecto activo. |
+| `panel-minio` | `minio/minio` | S3 local on-demand (solo si el proyecto tiene flag `minio`). API host `127.0.0.1:9100`, consola `127.0.0.1:9101`, datos en `~/.config/wordpress-panel/minio-data`, creds `panel`/`panel-secret`. |
 
 Nombre de DB compartida = `{prefix}-{version sin puntos}` (`DbType::service_prefix()`).
 
@@ -96,6 +96,8 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `github.rs` | `gh`/`git` en el HOST (no container, los archivos están bind-montados): `status`, `clone`, `pull`, `remove_dir`, `propose_path`. Sin auth propia. |
 | `ssl.rs` | `generate`: cert/key por dominio con mkcert en `ssl/` del proyecto. La CA local (`mkcert -install`) se hace una vez en `first-run.sh`. |
 | `dbus.rs` | Servidor D-Bus (zbus) para el plasmoid KDE; arranca en el `setup` de Tauri. Ver sección D-Bus. |
+| `backup.rs` | `export_db`: `wp db export` → `app/sql/db-{timestamp}.sql` (dump en la raíz pública montada, luego movido fuera de la raíz servida). |
+| `cli.rs` | `install_cli_wrapper`: copia `wp` y `wordpress-panel-cli` a `~/.local/bin` (chmod 755). El `wp` detecta el proyecto por el CWD vía `wordpress-panel-cli detect-project`. |
 
 ## Catálogo de comandos IPC
 
@@ -123,6 +125,12 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `gh_remove` | `id, kind, path` | `SiteConfig` | Borra carpeta + desregistra. |
 | `regenerate_ssl` | `id` | `()` | Regenera cert mkcert + reload nginx. |
 | `set_site_group` | `id, group?` | `SiteConfig` | Asigna/quita grupo del proyecto. |
+| `set_site_minio` | `id, enabled` | `SiteConfig` | Activa/desactiva MinIO; arranca el servicio si el proyecto corre. |
+| `export_db` | `id` | `String` (ruta) | Dump de la DB a `app/sql/`. |
+| `install_cli_wrapper` | — | `String` | Instala `wp`/`wordpress-panel-cli` en `~/.local/bin`. |
+| `open_mailpit` | — | `()` | Abre la UI de Mailpit. |
+| `open_minio` | — | `()` | Abre la consola de MinIO. |
+| `feature_stub` | `feature` | `String` (Err) | Stub Cloudflare/deploy/package (fase posterior). |
 
 **Eventos** (backend → frontend, vía `app.emit`): `log:{id}` — una línea de log por
 evento. El frontend se suscribe con `listen()` de `@tauri-apps/api/event`. Estado
@@ -155,6 +163,7 @@ sigue funcionando sin widget.
 ├── nginx/conf.d/{site-id}.conf    vhosts montados ro en panel-nginx
 ├── wp-cli.phar                    montado ro en cada wp-{id}
 ├── wp-versions.json               cache 24h de versiones WP
+├── minio-data/                    datos del S3 compartido (panel-minio)
 └── dnsmasq-panel.conf             snippet wildcard (referencia)
 
 ~/panel-wp/{slug}/                 (projects_root) — FUENTE DE VERDAD

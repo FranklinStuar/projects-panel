@@ -60,4 +60,16 @@ else
     echo "  [i] kpackagetool6 no disponible; omitiendo plasmoid (no es KDE?)"
 fi
 
+# 5. Wrapper WP-CLI -----------------------------------------------------------
+BIN="$HOME/.local/bin"
+SCRIPTS="$(dirname "$0")"
+install -d "$BIN"
+install -m755 "$SCRIPTS/wordpress-panel-cli.sh" "$BIN/wordpress-panel-cli"
+install -m755 "$SCRIPTS/wp-wrapper.sh" "$BIN/wp"
+echo "  [+] wrappers wp / wordpress-panel-cli instalados en $BIN"
+case ":$PATH:" in
+    *":$BIN:"*) ;;
+    *) echo "  [i] añade a tu shell:  export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
+esac
+
 echo "==> Listo. Lanza el panel con:  pnpm tauri dev"

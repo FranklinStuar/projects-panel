@@ -44,7 +44,7 @@ PLAN.md                  plan de producto
 CLAUDE.md                este archivo
 docs/                    architecture, extending, changelog
 src/                     frontend SvelteKit (SPA, ssr=false)
-  routes/                páginas (dashboard, site/new, site/[id], domains, settings)
+  routes/                páginas (dashboard, site/new, site/[id], domains, services, settings)
   lib/api.ts             capa IPC (espejo de comandos Rust)
   lib/types.ts           tipos TS (espejo de modelos serde)
 src-tauri/src/           backend Rust
@@ -52,8 +52,10 @@ src-tauri/src/           backend Rust
   config.rs              modelos + persistencia (~/panel-wp/*/config.json)
   docker.rs              orquestación bollard (red, compartidos, ciclo de vida)
   nginx.rs / php.rs / domain.rs / wpcli.rs / wordpress.rs
-docker/                  Dockerfile php-fpm + entrypoint, plantillas, mu-plugin
-scripts/                 first-run.sh, wp-wrapper.sh
+  logs.rs / autologin.rs / github.rs / ssl.rs / dbus.rs
+  backup.rs (export DB) / cli.rs (instala wrapper wp en ~/.local/bin)
+docker/                  Dockerfile php-fpm + entrypoint, plantillas, mu-plugins
+scripts/                 first-run.sh, wp-wrapper.sh, wordpress-panel-cli.sh
 ```
 
 ## Convenciones (no romper)
@@ -74,9 +76,12 @@ scripts/                 first-run.sh, wp-wrapper.sh
 
 ## Estado actual
 
-Fase 1 y Fase 2 completas. Fase 2 incluyó: logs en vivo, auto-login one-click,
-plugins/themes, GitHub vía `gh`, SSL con mkcert, grupos, y D-Bus + plasmoid KDE.
-Ver `docs/CHANGELOG.md` para el detalle y `PLAN.md` para lo pendiente (Fase 3:
-MinIO, MariaDB/Postgres, headless, stubs; Fase 4: settings, migración, import
-LocalWP; Fase 5: IA `agent.rs`). Temas diferidos: botones de la barra de título
-y verificación visual del plasmoid en sesión Plasma (`docs/KNOWN_ISSUES.md`).
+Fase 1, 2 y 3 completas. Fase 3 incluyó: Mailpit + MinIO compartidos on-demand,
+MariaDB/Postgres (infra), backup (export DB), wrapper WP-CLI (`wp` en
+~/.local/bin), flags headless/frontend, tab Servicios + ruta `/services`, y
+botones stub (Cloudflare/deploy/package). Ver `docs/CHANGELOG.md` para el detalle
+y `PLAN.md` para lo pendiente (Fase 4: settings, migración, import LocalWP,
+empaquetado plasmoid; Fase 5: IA `agent.rs`). Diferido dentro de Fase 3: container
+de frontend headless y plugin S3 que conecte WP a MinIO. Temas diferidos: botones
+de la barra de título y verificación visual del plasmoid en Plasma
+(`docs/KNOWN_ISSUES.md`).

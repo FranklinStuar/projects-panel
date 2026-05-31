@@ -38,6 +38,11 @@ pub struct NewSiteRequest {
     pub one_click_admin: bool,
     #[serde(default)]
     pub xdebug: bool,
+    #[serde(default)]
+    pub headless: bool,
+    pub frontend_framework: Option<String>,
+    #[serde(default)]
+    pub minio: bool,
     pub group: Option<String>,
 }
 
@@ -134,8 +139,9 @@ pub async fn create_site(docker: &DockerManager, req: NewSiteRequest) -> Result<
         github: GithubConfig::default(),
         one_click_admin: req.one_click_admin,
         xdebug_enabled: req.xdebug,
-        headless: false,
-        frontend_framework: None,
+        headless: req.headless,
+        frontend_framework: req.frontend_framework.clone(),
+        minio: req.minio,
         migration_pending: false,
         last_migrated_at: None,
     };

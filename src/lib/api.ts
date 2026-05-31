@@ -26,5 +26,13 @@ export const api = {
     invoke<SiteConfig>('gh_remove', { id, kind, path }),
   regenerateSsl: (id: string) => invoke<void>('regenerate_ssl', { id }),
   setSiteGroup: (id: string, group: string | null) =>
-    invoke<SiteConfig>('set_site_group', { id, group })
+    invoke<SiteConfig>('set_site_group', { id, group }),
+  // Fase 3
+  setSiteMinio: (id: string, enabled: boolean) =>
+    invoke<SiteConfig>('set_site_minio', { id, enabled }),
+  exportDb: (id: string) => invoke<string>('export_db', { id }),
+  installCliWrapper: () => invoke<string>('install_cli_wrapper'),
+  openMailpit: () => invoke<void>('open_mailpit'),
+  openMinio: () => invoke<void>('open_minio'),
+  featureStub: (feature: string) => invoke<string>('feature_stub', { feature })
 };

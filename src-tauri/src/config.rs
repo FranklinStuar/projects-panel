@@ -109,6 +109,9 @@ pub struct SiteConfig {
     pub xdebug_enabled: bool,
     pub headless: bool,
     pub frontend_framework: Option<String>,
+    /// MinIO (S3 local) compartido on-demand para este proyecto.
+    #[serde(default)]
+    pub minio: bool,
     #[serde(default)]
     pub migration_pending: bool,
     #[serde(default)]

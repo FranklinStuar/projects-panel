@@ -24,6 +24,12 @@ use crate::{domain, nginx};
 pub const NETWORK: &str = "panel-net";
 pub const NGINX: &str = "panel-nginx";
 pub const MAILPIT: &str = "panel-mailpit";
+pub const MINIO: &str = "panel-minio";
+
+/// Puertos host (solo 127.0.0.1) de las UIs de servicios compartidos.
+pub const MAILPIT_UI_PORT: u16 = 8025;
+pub const MINIO_API_PORT: u16 = 9100;
+pub const MINIO_CONSOLE_PORT: u16 = 9101;
 
 /// Prefijo común de todo lo que gestiona el panel (para detectar huérfanos).
 pub const PANEL_PREFIXES: &[&str] = &["wp-", "panel-"];
@@ -171,6 +177,117 @@ impl DockerManager {
         Ok(name)
     }
 
+    /// Arranca el capturador de correo compartido `panel-mailpit` (axllent/mailpit).
+    /// SMTP en `:1025` (solo red interna); UI web en `127.0.0.1:8025`.
+    pub async fn ensure_mailpit(&self) -> Result<()> {
+        if self.is_running(MAILPIT).await {
+            return Ok(());
+        }
+        if self.exists(MAILPIT).await {
+            self.docker
+                .start_container(MAILPIT, None::<StartContainerOptions<String>>)
+                .await?;
+            return Ok(());
+        }
+        let image = "axllent/mailpit:latest";
+        self.ensure_image(image).await?;
+
+        let ports = host_port_map(&[(MAILPIT_UI_PORT, "8025/tcp")]);
+        let mut exposed = HashMap::new();
+        exposed.insert("8025/tcp".to_string(), HashMap::new());
+        exposed.insert("1025/tcp".to_string(), HashMap::new());
+
+        let host_config = HostConfig {
+            network_mode: Some(NETWORK.to_string()),
+            port_bindings: Some(ports),
+            ..Default::default()
+        };
+        let config = Config {
+            image: Some(image.to_string()),
+            exposed_ports: Some(exposed),
+            host_config: Some(host_config),
+            ..Default::default()
+        };
+        self.docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: MAILPIT.to_string(),
+                    platform: None,
+                }),
+                config,
+            )
+            .await
+            .context("creando container panel-mailpit")?;
+        self.docker
+            .start_container(MAILPIT, None::<StartContainerOptions<String>>)
+            .await?;
+        Ok(())
+    }
+
+    /// Arranca el S3 local compartido `panel-minio` (on-demand, solo si un proyecto
+    /// lo pide). API S3 en `127.0.0.1:9100`, consola web en `127.0.0.1:9101`.
+    pub async fn ensure_minio(&self) -> Result<()> {
+        if self.is_running(MINIO).await {
+            return Ok(());
+        }
+        if self.exists(MINIO).await {
+            self.docker
+                .start_container(MINIO, None::<StartContainerOptions<String>>)
+                .await?;
+            return Ok(());
+        }
+        let image = "minio/minio:latest";
+        self.ensure_image(image).await?;
+
+        let data = crate::config::config_dir()?.join("minio-data");
+        std::fs::create_dir_all(&data).ok();
+
+        let ports = host_port_map(&[
+            (MINIO_API_PORT, "9000/tcp"),
+            (MINIO_CONSOLE_PORT, "9001/tcp"),
+        ]);
+        let mut exposed = HashMap::new();
+        exposed.insert("9000/tcp".to_string(), HashMap::new());
+        exposed.insert("9001/tcp".to_string(), HashMap::new());
+
+        let host_config = HostConfig {
+            network_mode: Some(NETWORK.to_string()),
+            port_bindings: Some(ports),
+            binds: Some(vec![format!("{}:/data", data.display())]),
+            ..Default::default()
+        };
+        let config = Config {
+            image: Some(image.to_string()),
+            cmd: Some(vec![
+                "server".to_string(),
+                "/data".to_string(),
+                "--console-address".to_string(),
+                ":9001".to_string(),
+            ]),
+            env: Some(vec![
+                "MINIO_ROOT_USER=panel".to_string(),
+                "MINIO_ROOT_PASSWORD=panel-secret".to_string(),
+            ]),
+            exposed_ports: Some(exposed),
+            host_config: Some(host_config),
+            ..Default::default()
+        };
+        self.docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: MINIO.to_string(),
+                    platform: None,
+                }),
+                config,
+            )
+            .await
+            .context("creando container panel-minio")?;
+        self.docker
+            .start_container(MINIO, None::<StartContainerOptions<String>>)
+            .await?;
+        Ok(())
+    }
+
     /// Arranca el reverse-proxy nginx compartido si no está corriendo.
     /// Monta el directorio de vhosts (host) y la raíz de proyectos (ro).
     pub async fn ensure_nginx(&self) -> Result<()> {
@@ -257,6 +374,11 @@ impl DockerManager {
     pub async fn start_site(&self, site: &SiteConfig) -> Result<()> {
         self.ensure_network().await?;
         self.ensure_db(&site.services.db).await?;
+        // Mailpit captura el correo de todos los proyectos activos.
+        self.ensure_mailpit().await.ok();
+        if site.minio {
+            self.ensure_minio().await.ok();
+        }
 
         let cname = site.container_name();
         let image = crate::php::ensure_php_image(&site.services.php.version).await?;
@@ -348,12 +470,16 @@ impl DockerManager {
         // ¿Algún OTRO proyecto sigue su container php corriendo?
         let mut active_dbs = Vec::new();
         let mut any_active = false;
+        let mut any_minio = false;
         for s in all {
             if s.id == stopped.id {
                 continue;
             }
             if self.is_running(&s.container_name()).await {
                 any_active = true;
+                if s.minio {
+                    any_minio = true;
+                }
                 active_dbs.push(format!(
                     "{}-{}",
                     s.services.db.db_type.service_prefix(),
@@ -375,12 +501,24 @@ impl DockerManager {
                 .ok();
         }
 
-        // nginx: si no queda ningún proyecto activo, apagarlo también.
-        if !any_active && self.is_running(NGINX).await {
+        // MinIO: apagar si ningún activo lo usa.
+        if !any_minio && self.is_running(MINIO).await {
             self.docker
-                .stop_container(NGINX, Some(StopContainerOptions { t: 10 }))
+                .stop_container(MINIO, Some(StopContainerOptions { t: 10 }))
                 .await
                 .ok();
+        }
+
+        // nginx + mailpit: si no queda ningún proyecto activo, apagarlos también.
+        if !any_active {
+            for svc in [NGINX, MAILPIT] {
+                if self.is_running(svc).await {
+                    self.docker
+                        .stop_container(svc, Some(StopContainerOptions { t: 10 }))
+                        .await
+                        .ok();
+                }
+            }
         }
         Ok(())
     }
@@ -462,6 +600,22 @@ unsafe fn libc_getuid() -> u32 {
 }
 unsafe fn libc_getgid() -> u32 {
     getgid()
+}
+
+/// Mapea puertos del container a `127.0.0.1:{host}` (solo loopback).
+/// `specs` = `(host_port, "container_port/tcp")`.
+fn host_port_map(specs: &[(u16, &str)]) -> HashMap<String, Option<Vec<PortBinding>>> {
+    let mut map = HashMap::new();
+    for (host, cport) in specs {
+        map.insert(
+            cport.to_string(),
+            Some(vec![PortBinding {
+                host_ip: Some("127.0.0.1".to_string()),
+                host_port: Some(host.to_string()),
+            }]),
+        );
+    }
+    map
 }
 
 fn db_env(db: &DbService) -> Vec<String> {

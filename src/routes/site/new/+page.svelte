@@ -28,6 +28,11 @@
   let ssl = $state(true);
   let oneClickAdmin = $state(true);
   let xdebug = $state(false);
+  let headless = $state(false);
+  let frontendFramework = $state('');
+  let minio = $state(false);
+
+  const FRONTENDS = ['Next.js', 'Nuxt', 'SvelteKit', 'Astro', 'Remix'];
 
   let versions = $state<WpVersion[]>([]);
   let versionsError = $state<string | null>(null);
@@ -87,6 +92,9 @@
       ssl,
       oneClickAdmin,
       xdebug,
+      headless,
+      frontendFramework: headless ? frontendFramework || null : null,
+      minio,
       group: null
     };
     try {
@@ -240,6 +248,17 @@
           <label class="flex items-center gap-2"><input type="checkbox" bind:checked={ssl} /> SSL (HTTPS)</label>
           <label class="flex items-center gap-2"><input type="checkbox" bind:checked={oneClickAdmin} /> Auto-login al admin</label>
           <label class="flex items-center gap-2"><input type="checkbox" bind:checked={xdebug} /> XDebug</label>
+          <label class="flex items-center gap-2"><input type="checkbox" bind:checked={minio} /> MinIO (S3 local compartido)</label>
+          <label class="flex items-center gap-2"><input type="checkbox" bind:checked={headless} /> Proyecto headless (frontend separado)</label>
+          {#if headless}
+            <label class="ml-6 flex flex-col gap-1">
+              <span class="text-zinc-500">Framework del frontend</span>
+              <select class="input" bind:value={frontendFramework}>
+                <option value="">(elige)</option>
+                {#each FRONTENDS as f (f)}<option value={f}>{f}</option>{/each}
+              </select>
+            </label>
+          {/if}
         </div>
       </fieldset>
 

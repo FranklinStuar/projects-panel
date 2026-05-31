@@ -46,6 +46,7 @@ export interface SiteConfig {
   xdebugEnabled: boolean;
   headless: boolean;
   frontendFramework: string | null;
+  minio: boolean;
   migrationPending: boolean;
   lastMigratedAt: string | null;
 }
@@ -83,5 +84,8 @@ export interface NewSiteRequest {
   ssl?: boolean;
   oneClickAdmin?: boolean;
   xdebug?: boolean;
+  headless?: boolean;
+  frontendFramework?: string | null;
+  minio?: boolean;
   group?: string | null;
 }

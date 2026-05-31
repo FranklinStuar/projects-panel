@@ -7,7 +7,7 @@
 
   let site = $state<SiteState | null>(null);
   let notFound = $state(false);
-  let tab = $state<'info' | 'logs' | 'ext' | 'github'>('info');
+  let tab = $state<'info' | 'logs' | 'ext' | 'github' | 'svc'>('info');
   let error = $state<string | null>(null);
   let busy = $state(false);
 
@@ -142,11 +142,32 @@
   onMount(load);
   onDestroy(stopLogs);
 
+  // --- Servicios (Fase 3) ---------------------------------------------------
+  let svcMsg = $state<string | null>(null);
+  let svcErr = $state<string | null>(null);
+  let svcBusy = $state(false);
+
+  async function svcAction(fn: () => Promise<unknown>) {
+    svcBusy = true;
+    svcErr = null;
+    svcMsg = null;
+    try {
+      const r = await fn();
+      if (typeof r === 'string') svcMsg = r;
+      await load();
+    } catch (e) {
+      svcErr = String(e);
+    } finally {
+      svcBusy = false;
+    }
+  }
+
   const tabs = [
     { id: 'info', label: 'Info' },
     { id: 'logs', label: 'Logs' },
     { id: 'ext', label: 'Plugins / Themes' },
-    { id: 'github', label: 'GitHub' }
+    { id: 'github', label: 'GitHub' },
+    { id: 'svc', label: 'Servicios' }
   ] as const;
 </script>
 
@@ -213,6 +234,10 @@
       <dd>{site.config.services.nginx.ssl ? 'Sí' : 'No'}</dd>
       <dt class="text-zinc-500">Auto-login</dt>
       <dd>{site.config.oneClickAdmin ? 'Sí' : 'No'}</dd>
+      <dt class="text-zinc-500">Headless</dt>
+      <dd>{site.config.headless ? (site.config.frontendFramework ?? 'Sí') : 'No'}</dd>
+      <dt class="text-zinc-500">MinIO</dt>
+      <dd>{site.config.minio ? 'Sí' : 'No'}</dd>
       <dt class="text-zinc-500">Ruta</dt>
       <dd class="truncate">{site.config.path}</dd>
     </dl>
@@ -355,6 +380,55 @@
           onclick={() => ghAction(() => api.ghClone(id, 'plugin', pluginRepo, pluginBranch).then(() => (pluginRepo = '')))}>Agregar</button>
       </div>
     {/if}
+  {:else if tab === 'svc'}
+    {#if svcErr}
+      <div class="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">{svcErr}</div>
+    {/if}
+    {#if svcMsg}
+      <div class="mb-3 whitespace-pre-wrap rounded border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300">{svcMsg}</div>
+    {/if}
+
+    <!-- Backup -->
+    <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Backup</h3>
+    <div class="mb-4 flex items-center gap-2 text-sm">
+      <button class="rounded bg-zinc-200 px-3 py-1.5 disabled:opacity-50 dark:bg-zinc-800"
+        disabled={svcBusy || site.status !== 'running'}
+        onclick={() => svcAction(() => api.exportDb(id))}>Exportar base de datos</button>
+      {#if site.status !== 'running'}<span class="text-xs text-zinc-500">(enciende el proyecto)</span>{/if}
+    </div>
+
+    <!-- Correo / S3 -->
+    <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Servicios compartidos</h3>
+    <div class="mb-4 flex flex-col gap-2 text-sm">
+      <button class="self-start rounded bg-zinc-200 px-3 py-1.5 disabled:opacity-50 dark:bg-zinc-800"
+        disabled={svcBusy} onclick={() => svcAction(() => api.openMailpit())}>Abrir Mailpit (correo)</button>
+      <label class="flex items-center gap-2">
+        <input type="checkbox" checked={site.config.minio} disabled={svcBusy}
+          onchange={(ev) => svcAction(() => api.setSiteMinio(id, (ev.target as HTMLInputElement).checked))} />
+        MinIO (S3 local compartido)
+      </label>
+      {#if site.config.minio}
+        <button class="self-start rounded bg-zinc-200 px-3 py-1.5 disabled:opacity-50 dark:bg-zinc-800"
+          disabled={svcBusy} onclick={() => svcAction(() => api.openMinio())}>Abrir consola MinIO</button>
+      {/if}
+    </div>
+
+    <!-- WP-CLI terminal -->
+    <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Terminal WP-CLI</h3>
+    <div class="mb-4 flex items-center gap-2 text-sm">
+      <button class="rounded bg-zinc-200 px-3 py-1.5 disabled:opacity-50 dark:bg-zinc-800"
+        disabled={svcBusy} onclick={() => svcAction(() => api.installCliWrapper())}>Instalar wrapper `wp`</button>
+      <span class="text-xs text-zinc-500">Luego usa <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">wp ...</code> dentro de la carpeta del proyecto.</span>
+    </div>
+
+    <!-- Stubs -->
+    <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Próximamente</h3>
+    <div class="flex flex-wrap gap-2 text-sm">
+      {#each [['cloudflare', 'Cloudflare Tunnel'], ['deploy', 'Deploy'], ['package', 'Empaquetar sitio']] as [key, label] (key)}
+        <button class="rounded border border-dashed border-zinc-300 px-3 py-1.5 text-zinc-500 disabled:opacity-50 dark:border-zinc-700"
+          disabled={svcBusy} onclick={() => svcAction(() => api.featureStub(key))}>{label}</button>
+      {/each}
+    </div>
   {/if}
 {:else}
   <p class="text-sm text-zinc-500">Cargando…</p>

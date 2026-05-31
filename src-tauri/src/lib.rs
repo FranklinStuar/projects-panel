@@ -1,6 +1,8 @@
 //! Panel WP — backend Tauri.
 
 mod autologin;
+mod backup;
+mod cli;
 mod config;
 mod dbus;
 mod docker;
@@ -175,6 +177,74 @@ async fn set_site_group(id: String, group: Option<String>) -> CmdResult<SiteConf
     Ok(site)
 }
 
+// -- Fase 3: servicios adicionales -------------------------------------------
+
+/// Activa/desactiva MinIO (S3 local) para un proyecto. Si está encendido,
+/// arranca/para el servicio compartido al instante.
+#[tauri::command]
+async fn set_site_minio(id: String, enabled: bool) -> CmdResult<SiteConfig> {
+    let mut site = load_site(&id)?;
+    site.minio = enabled;
+    config::write_site_config(&site).map_err(e)?;
+    let docker = DockerManager::connect().map_err(e)?;
+    if enabled && docker.is_running(&site.container_name()).await {
+        docker.ensure_minio().await.map_err(e)?;
+    }
+    Ok(site)
+}
+
+/// Exporta la base de datos del proyecto a `app/sql/`. Devuelve la ruta del dump.
+#[tauri::command]
+async fn export_db(id: String) -> CmdResult<String> {
+    let site = load_site(&id)?;
+    let docker = DockerManager::connect().map_err(e)?;
+    backup::export_db(&docker, &site).await.map_err(e)
+}
+
+/// Instala los wrappers WP-CLI (`wp`, `wordpress-panel-cli`) en `~/.local/bin`.
+#[tauri::command]
+async fn install_cli_wrapper() -> CmdResult<String> {
+    cli::install_cli_wrapper().map_err(e)
+}
+
+/// Abre la UI de Mailpit (correo capturado) en el navegador.
+#[tauri::command]
+async fn open_mailpit(app: AppHandle) -> CmdResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let docker = DockerManager::connect().map_err(e)?;
+    if !docker.is_running(docker::MAILPIT).await {
+        return Err("Mailpit no está corriendo (enciende algún proyecto)".into());
+    }
+    let url = format!("http://127.0.0.1:{}/", docker::MAILPIT_UI_PORT);
+    app.opener().open_url(url, None::<&str>).map_err(e)
+}
+
+/// Abre la consola web de MinIO en el navegador.
+#[tauri::command]
+async fn open_minio(app: AppHandle) -> CmdResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let docker = DockerManager::connect().map_err(e)?;
+    if !docker.is_running(docker::MINIO).await {
+        return Err("MinIO no está corriendo (actívalo en un proyecto activo)".into());
+    }
+    let url = format!("http://127.0.0.1:{}/", docker::MINIO_CONSOLE_PORT);
+    app.opener().open_url(url, None::<&str>).map_err(e)
+}
+
+/// Stubs de Fase posterior: devuelven un mensaje informativo (UI preparada).
+#[tauri::command]
+async fn feature_stub(feature: String) -> CmdResult<String> {
+    let label = match feature.as_str() {
+        "cloudflare" => "Cloudflare Tunnel",
+        "deploy" => "Deploy",
+        "package" => "Empaquetado del sitio",
+        other => other,
+    };
+    Err(format!(
+        "{label}: aún no implementado. Planificado para una fase posterior."
+    ))
+}
+
 fn load_site(id: &str) -> CmdResult<SiteConfig> {
     config::find_site(id)
         .map_err(e)?
@@ -287,7 +357,13 @@ pub fn run() {
             gh_pull_all,
             gh_remove,
             regenerate_ssl,
-            set_site_group
+            set_site_group,
+            set_site_minio,
+            export_db,
+            install_cli_wrapper,
+            open_mailpit,
+            open_minio,
+            feature_stub
         ])
         .run(tauri::generate_context!())
         .expect("error al arrancar la aplicación Tauri");

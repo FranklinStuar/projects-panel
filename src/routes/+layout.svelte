@@ -6,6 +6,7 @@
   const nav = [
     { href: '/', label: 'Proyectos' },
     { href: '/domains', label: 'Dominios' },
+    { href: '/services', label: 'Servicios' },
     { href: '/settings', label: 'Configuración' }
   ];
 </script>

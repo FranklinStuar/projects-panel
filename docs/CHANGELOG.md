@@ -67,10 +67,42 @@ Cimientos de la optimización de recursos.
 Fase 2 completa. Pendiente de verificación: comportamiento visual del plasmoid en
 una sesión Plasma (no testeable headless) y la barra de título (KNOWN_ISSUES).
 
-## Fase 3+ — Pendiente
+## Fase 3 — Servicios adicionales (COMPLETA)
 
-Ver `PLAN.md`: MinIO, MariaDB/Postgres, headless, migración, import LocalWP; y
-Fase 5 IA (`agent.rs`).
+### Hecho
+- **Servicios compartidos on-demand** (`docker.rs`): `ensure_mailpit` (axllent/
+  mailpit, UI `127.0.0.1:8025`, SMTP `:1025` interno) y `ensure_minio` (minio/
+  minio, API `127.0.0.1:9100`, consola `127.0.0.1:9101`, datos en
+  `~/.config/wordpress-panel/minio-data`). Mailpit arranca con cualquier proyecto
+  activo; MinIO solo si el proyecto tiene el flag `minio`. `teardown_unused_shared`
+  los apaga cuando ningún activo los usa (mailpit/nginx si no queda ninguno; minio
+  si nadie lo pide). Helper `host_port_map` (bind solo a loopback).
+- **MariaDB y PostgreSQL**: ya soportados a nivel de infra (`DbType` → imagen,
+  `db_env`, `create_database` con rama SQL por motor). Selector en el form.
+- **Backup** (`backup.rs`): `export_db` vía `wp db export` a la raíz pública
+  (montada) y movido a `app/sql/db-{timestamp}.sql`. Comando `export_db`.
+- **Wrapper WP-CLI** (`cli.rs` + `scripts/wp-wrapper.sh` +
+  `scripts/wordpress-panel-cli.sh`): `install_cli_wrapper` copia `wp` y
+  `wordpress-panel-cli` a `~/.local/bin` (chmod 755) y avisa si no está en PATH.
+  `wp` detecta el proyecto por el CWD y ejecuta WP-CLI en su container.
+- **Headless**: flags `headless` + `frontendFramework` en `NewSiteRequest`/
+  `SiteConfig`; checkbox + selector de framework en el form; visible en Info.
+- **Botones stub** (`feature_stub`): Cloudflare Tunnel / Deploy / Empaquetado —
+  UI preparada, devuelven mensaje "no implementado, fase posterior".
+- **Frontend**: tab **Servicios** en la vista de proyecto (backup, abrir Mailpit,
+  toggle + abrir MinIO, instalar wrapper, stubs) y ruta **`/services`**
+  (servicios compartidos del panel). Flag `minio` en `SiteConfig`/types.
+- **Comandos IPC nuevos**: `set_site_minio`, `export_db`, `install_cli_wrapper`,
+  `open_mailpit`, `open_minio`, `feature_stub`.
+
+Pendiente real de Fase 3 (diferido): provisión de un container de frontend para
+proyectos headless (hoy solo se guardan los flags) y plugin S3 que conecte WP a
+MinIO (el servicio se ofrece, la integración WP queda al usuario).
+
+## Fase 4+ — Pendiente
+
+Ver `PLAN.md`: migración entre sistemas, import LocalWP, settings completo,
+empaquetado del plasmoid; y Fase 5 IA (`agent.rs`).
 
 ## Diferido (fuera de fase)
 
