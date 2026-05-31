@@ -56,3 +56,26 @@ export interface SiteState {
   config: SiteConfig;
   status: SiteStatus;
 }
+
+export interface WpVersion {
+  version: string;
+  status: string; // "latest" | "outdated" | "insecure"
+}
+
+export interface NewSiteRequest {
+  name: string;
+  domain?: string;
+  wpVersion: string;
+  locale?: string;
+  phpVersion: string;
+  dbType: DbType;
+  dbVersion: string;
+  adminUser: string;
+  adminPassword: string;
+  adminEmail: string;
+  title: string;
+  ssl?: boolean;
+  oneClickAdmin?: boolean;
+  xdebug?: boolean;
+  group?: string | null;
+}

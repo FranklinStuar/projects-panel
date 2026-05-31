@@ -45,6 +45,58 @@ fn default_locale() -> String {
     "en_US".to_string()
 }
 
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+pub struct WpVersion {
+    pub version: String,
+    pub status: String, // "latest" | "outdated" | "insecure"
+}
+
+/// Lista de versiones de WordPress desde la API de wordpress.org, con cache 24h.
+/// Ordenada de más nueva a más antigua.
+pub async fn fetch_versions() -> Result<Vec<WpVersion>> {
+    let cache = crate::config::config_dir()?.join("wp-versions.json");
+
+    // cache fresca (<24h)
+    if let Ok(meta) = std::fs::metadata(&cache) {
+        if let Ok(modified) = meta.modified() {
+            if modified.elapsed().map(|d| d.as_secs() < 86_400).unwrap_or(false) {
+                if let Ok(raw) = std::fs::read_to_string(&cache) {
+                    if let Ok(v) = serde_json::from_str::<Vec<WpVersion>>(&raw) {
+                        return Ok(v);
+                    }
+                }
+            }
+        }
+    }
+
+    let map: std::collections::HashMap<String, String> =
+        reqwest::get("https://api.wordpress.org/core/stable-check/1.0/")
+            .await
+            .context("consultando versiones de WordPress")?
+            .error_for_status()?
+            .json()
+            .await?;
+
+    let mut versions: Vec<WpVersion> = map
+        .into_iter()
+        .map(|(version, status)| WpVersion { version, status })
+        .collect();
+    versions.sort_by(|a, b| version_key(&b.version).cmp(&version_key(&a.version)));
+
+    std::fs::write(&cache, serde_json::to_string(&versions)?).ok();
+    Ok(versions)
+}
+
+/// Clave numérica para ordenar versiones tipo "6.7.2".
+fn version_key(v: &str) -> (u32, u32, u32) {
+    let mut it = v.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
+    (
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+        it.next().unwrap_or(0),
+    )
+}
+
 /// Crea el proyecto de principio a fin y lo deja encendido.
 pub async fn create_site(docker: &DockerManager, req: NewSiteRequest) -> Result<SiteConfig> {
     let id = Uuid::new_v4().to_string();

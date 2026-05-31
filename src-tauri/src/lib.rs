@@ -10,7 +10,7 @@ mod wpcli;
 
 use config::{SiteConfig, SiteState};
 use docker::DockerManager;
-use wordpress::NewSiteRequest;
+use wordpress::{NewSiteRequest, WpVersion};
 
 type CmdResult<T> = Result<T, String>;
 
@@ -77,6 +77,11 @@ async fn create_site(req: NewSiteRequest) -> CmdResult<SiteConfig> {
     wordpress::create_site(&docker, req).await.map_err(e)
 }
 
+#[tauri::command]
+async fn list_wp_versions() -> CmdResult<Vec<WpVersion>> {
+    wordpress::fetch_versions().await.map_err(e)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -88,7 +93,8 @@ pub fn run() {
             stop_site,
             stop_all_sites,
             exec_wpcli,
-            create_site
+            create_site,
+            list_wp_versions
         ])
         .run(tauri::generate_context!())
         .expect("error al arrancar la aplicación Tauri");
