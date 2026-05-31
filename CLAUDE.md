@@ -76,12 +76,11 @@ scripts/                 first-run.sh, wp-wrapper.sh, wordpress-panel-cli.sh
 
 ## Estado actual
 
-Fase 1, 2 y 3 completas. Fase 3 incluyó: Mailpit + MinIO compartidos on-demand,
-MariaDB/Postgres (infra), backup (export DB), wrapper WP-CLI (`wp` en
-~/.local/bin), flags headless/frontend, tab Servicios + ruta `/services`, y
-botones stub (Cloudflare/deploy/package). Ver `docs/CHANGELOG.md` para el detalle
-y `PLAN.md` para lo pendiente (Fase 4: settings, migración, import LocalWP,
-empaquetado plasmoid; Fase 5: IA `agent.rs`). Diferido dentro de Fase 3: container
-de frontend headless y plugin S3 que conecte WP a MinIO. Temas diferidos: botones
-de la barra de título y verificación visual del plasmoid en Plasma
-(`docs/KNOWN_ISSUES.md`).
+Fases 1–4 completas. Fase 4 incluyó: pantalla de configuración con estado del
+sistema (`system.rs`), migración entre sistemas + export-al-detener
+(`migrate.rs`, `backup::rotate_dumps`), import desde LocalWP (`localwp.rs`) y
+empaquetado del plasmoid (`scripts/package-plasmoid.sh`). Pendiente: Fase 5 (IA,
+`agent.rs`). Ver `docs/CHANGELOG.md` para el detalle. Diferido dentro de Fase 3:
+container de frontend headless y plugin S3 (WP↔MinIO). Limitaciones/temas
+diferidos en `docs/KNOWN_ISSUES.md`: botones de la barra de título, verificación
+visual del plasmoid en Plasma, e import LocalWP (la DB requiere dump en disco).

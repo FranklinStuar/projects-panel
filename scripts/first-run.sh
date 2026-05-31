@@ -56,6 +56,7 @@ if command -v kpackagetool6 >/dev/null 2>&1 && [ -d "$PLASMOID_DIR" ]; then
             || echo "  [i] plasmoid ya instalado o sin cambios"
     fi
     echo "      Añádelo al panel: clic derecho en el panel → Añadir widgets → 'Panel WP'"
+    echo "      (Para distribuir: bash scripts/package-plasmoid.sh → dist/wordpress-panel.plasmoid)"
 else
     echo "  [i] kpackagetool6 no disponible; omitiendo plasmoid (no es KDE?)"
 fi

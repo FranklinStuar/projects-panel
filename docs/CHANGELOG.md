@@ -214,6 +214,15 @@ estado, pero no había forma de migrar ni de exportar la DB al apagar.
   panel (`fix_site_url`) para que el admin funcione aunque el dump venga de
   `*.local`. Limitación (sin `search-replace`) documentada en `KNOWN_ISSUES.md`.
 
+### Empaquetado del plasmoid
+
+- **`scripts/package-plasmoid.sh`** (nuevo): genera `dist/wordpress-panel.plasmoid`
+  (zip de `metadata.json` + `contents/`) instalable con
+  `kpackagetool6 --install`. Idempotente. `first-run.sh` lo menciona; `dist/`
+  ignorado en git.
+
+**Fase 4 completa.** Falta solo Fase 5 (asistente IA, `agent.rs`).
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).

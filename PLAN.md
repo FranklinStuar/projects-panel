@@ -534,11 +534,11 @@ add_action( 'phpmailer_init', function ( $mailer ) {
 4. Botones stub: Cloudflare tunnel, backup, deploy, packaging (UI preparada, lógica posterior)
 5. Wrapper WP-CLI para terminal
 
-### Fase 4 — Polish
-1. Panel de configuración completo
-2. Migración entre sistemas: escaneo de `~/panel-wp/`, diálogo de migración bajo demanda, export automático de DB al detener
-3. Migración desde LocalWP (leer `~/.config/Local/sites.json` para importar proyectos existentes)
-4. Empaquetado del plasmoid para instalación
+### Fase 4 — Polish ✅ (completa)
+1. ✅ Panel de configuración completo (estado del sistema, `system.rs` + `/settings`)
+2. ✅ Migración entre sistemas: escaneo de `~/panel-wp/`, "Migrar y encender" bajo demanda (`migrate.rs`), export automático de DB al detener (`backup::rotate_dumps`)
+3. ✅ Migración desde LocalWP (lee `~/.config/Local/sites.json`, `localwp.rs`)
+4. ✅ Empaquetado del plasmoid (`scripts/package-plasmoid.sh` → `dist/*.plasmoid`)
 
 ### Fase 5 — Asistente IA (opcional, expansible)
 Fuera del núcleo de optimización de recursos. `agent.rs` y el tab "Asistente IA" se construyen una vez el resto es estable (ver sección "Agentes de IA"). Es la base mínima sobre la que se iterará.
