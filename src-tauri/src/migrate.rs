@@ -35,14 +35,21 @@ pub async fn migrate_site(docker: &DockerManager, site: &SiteConfig) -> Result<M
     let db_container = docker.ensure_db(&site.services.db).await?;
     crate::wordpress::create_database(docker, &db_container, site).await?;
 
-    // 2. Encender container php + vhost en panel-nginx + reload.
+    // 2. SSL: generar el certificado ANTES de encender, porque el vhost de
+    //    panel-nginx lo referencia y `nginx -s reload` falla si no existe (la CA
+    //    de mkcert es local; se regenera en cada sistema).
+    if site.services.nginx.ssl {
+        crate::ssl::generate(site).await?;
+    }
+
+    // 3. Encender container php + vhost en panel-nginx + reload.
     docker.start_site(site).await?;
 
-    // 3. Regenerar wp-config con las credenciales del panel: el origen pudo usar
+    // 4. Regenerar wp-config con las credenciales del panel: el origen pudo usar
     //    otro host/disco (otra instalación del panel, o LocalWP).
     crate::wordpress::wp_config_create(docker, site, &db_container).await?;
 
-    // 4. Importar el último dump si existe; si no, el sitio arranca vacío.
+    // 5. Importar el último dump si existe; si no, el sitio arranca vacío.
     let note = match latest_dump(site) {
         Some(dump) => {
             import_dump(docker, site, &dump).await?;
@@ -55,12 +62,6 @@ pub async fn migrate_site(docker: &DockerManager, site: &SiteConfig) -> Result<M
             "No había dump en app/sql/: el sitio arranca con la base de datos vacía.".to_string(),
         ),
     };
-
-    // 5. SSL: regenerar el certificado para este sistema (la CA de mkcert es local).
-    if site.services.nginx.ssl {
-        crate::ssl::generate(site).await?;
-        docker.reload_nginx().await.ok();
-    }
 
     // 6. Marcar como migrado.
     let mut updated = site.clone();
