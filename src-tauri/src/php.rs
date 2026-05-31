@@ -11,9 +11,15 @@ use tokio::process::Command;
 const WP_CLI_URL: &str =
     "https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar";
 
+/// Revisión de la imagen: forma parte del tag (`panel-php:{ver}-{rev}`). Súbela
+/// cuando cambie `docker/php/Dockerfile` para forzar reconstrucción — el tag
+/// nuevo no existe, así `ensure_php_image` reconstruye y `start_site` recrea los
+/// containers que aún usen el tag viejo. (r2: añade mariadb-client para WP-CLI.)
+pub const IMAGE_REV: &str = "r2";
+
 /// Construye (si falta) y devuelve el tag de la imagen php para una versión.
 pub async fn ensure_php_image(version: &str) -> Result<String> {
-    let tag = format!("panel-php:{version}");
+    let tag = format!("panel-php:{version}-{IMAGE_REV}");
 
     // ¿ya existe localmente?
     let inspect = Command::new("docker")

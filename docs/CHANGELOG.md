@@ -221,6 +221,22 @@ estado, pero no había forma de migrar ni de exportar la DB al apagar.
   `kpackagetool6 --install`. Idempotente. `first-run.sh` lo menciona; `dist/`
   ignorado en git.
 
+### Fix — WP-CLI `db import`/`export` necesitaba el cliente mysql
+
+`wp db import/export` (backup, migración, import LocalWP) ejecuta `mysql`/
+`mysqldump`, que no estaban en la imagen php-fpm (alpine) → `env: can't execute
+'mysql'`. La imagen ahora instala `mariadb-client` (aporta los symlinks
+`mysql`/`mysqldump`). Para que el cambio aterrice sin `docker rmi` manual, el tag
+de imagen lleva una revisión (`panel-php:{ver}-{rev}`, `php::IMAGE_REV`): al
+subirla, `ensure_php_image` reconstruye y `start_site` **recrea** los containers
+que aún usen el tag viejo (compara `container_image` con el tag deseado).
+
+### Fix — migración: generar SSL antes de encender
+
+El vhost referencia `ssl/cert.pem`; `migrate_site` encendía el sitio (escribe
+vhost + `nginx -s reload`) antes de generar el cert → reload fallaba. Reordenado:
+`ssl::generate` antes de `start_site`, igual que `create_site`.
+
 **Fase 4 completa.** Falta solo Fase 5 (asistente IA, `agent.rs`).
 
 ## Fase 4+ — Pendiente

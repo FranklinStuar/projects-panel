@@ -94,6 +94,15 @@ impl DockerManager {
         self.docker.inspect_container(name, None).await.is_ok()
     }
 
+    /// Tag de imagen con el que se creó el container (`config.image`), si existe.
+    pub async fn container_image(&self, name: &str) -> Option<String> {
+        self.docker
+            .inspect_container(name, None)
+            .await
+            .ok()
+            .and_then(|info| info.config.and_then(|c| c.image))
+    }
+
     /// Containers del panel actualmente corriendo (nombres sin la `/` inicial).
     #[allow(dead_code)] // detección de huérfanos (shutdown.rs) en Fase 2
     pub async fn running_panel_containers(&self) -> Result<Vec<String>> {
@@ -522,6 +531,22 @@ impl DockerManager {
 
         let cname = site.container_name();
         let image = crate::php::ensure_php_image(&site.services.php.version).await?;
+
+        // Si el container existe pero se creó con OTRA imagen (p. ej. tras subir
+        // IMAGE_REV), recrearlo para que tome la nueva (forzado: puede correr).
+        if self.exists(&cname).await && self.container_image(&cname).await.as_deref() != Some(&image)
+        {
+            self.docker
+                .remove_container(
+                    &cname,
+                    Some(RemoveContainerOptions {
+                        force: true,
+                        ..Default::default()
+                    }),
+                )
+                .await
+                .ok();
+        }
 
         if !self.exists(&cname).await {
             self.create_php_container(site, &image).await?;

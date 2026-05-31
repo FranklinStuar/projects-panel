@@ -12,6 +12,9 @@ RUN set -eux; \
     apk add --no-cache freetype libjpeg-turbo libpng libzip icu-libs; \
     # shadow aporta usermod/groupmod para remapear www-data en runtime
     apk add --no-cache shadow su-exec; \
+    # mariadb-client da los binarios `mysql`/`mysqldump` (symlinks) que WP-CLI
+    # usa para `wp db import`/`export` (backup, migración, import LocalWP).
+    apk add --no-cache mariadb-client; \
     apk del .build-deps
 
 COPY entrypoint.sh /usr/local/bin/panel-entrypoint
