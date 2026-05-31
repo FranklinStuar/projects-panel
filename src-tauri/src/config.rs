@@ -322,3 +322,94 @@ pub fn write_site_config(cfg: &SiteConfig) -> Result<()> {
 pub fn find_site(id: &str) -> Result<Option<SiteConfig>> {
     Ok(load_all_sites()?.into_iter().find(|s| s.id == id))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn site() -> SiteConfig {
+        SiteConfig {
+            id: "abc123".into(),
+            name: "Demo".into(),
+            path: "/home/u/panel-wp/demo".into(),
+            domain: "demo.test".into(),
+            group: Some("LocalWP".into()),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            services: Services {
+                php: PhpService { version: "8.3".into() },
+                nginx: NginxService { ssl: true },
+                db: DbService {
+                    db_type: DbType::Mysql,
+                    version: "8.0".into(),
+                    db_name: "demo".into(),
+                },
+            },
+            github: GithubConfig::default(),
+            one_click_admin: true,
+            xdebug_enabled: false,
+            headless: false,
+            frontend_framework: None,
+            minio: false,
+            migration_pending: true,
+            last_migrated_at: None,
+        }
+    }
+
+    #[test]
+    fn container_name_y_sql_dir() {
+        let s = site();
+        assert_eq!(s.container_name(), "wp-abc123");
+        assert_eq!(
+            s.sql_dir(),
+            std::path::Path::new("/home/u/panel-wp/demo/app/sql")
+        );
+    }
+
+    #[test]
+    fn site_url_cuatro_ramas() {
+        let limpio = Endpoint::default(); // 80/443
+        assert_eq!(limpio.site_url("demo.test", true), "https://demo.test");
+        assert_eq!(limpio.site_url("demo.test", false), "http://demo.test");
+
+        let alterno = Endpoint {
+            loopback_ip: "127.0.0.1".into(),
+            http_port: 8080,
+            https_port: 8443,
+        };
+        assert_eq!(alterno.site_url("demo.test", true), "https://demo.test:8443");
+        assert_eq!(alterno.site_url("demo.test", false), "http://demo.test:8080");
+    }
+
+    #[test]
+    fn endpoint_serializa_en_camelcase() {
+        let v = serde_json::to_value(Endpoint::default()).unwrap();
+        assert!(v.get("loopbackIp").is_some(), "falta loopbackIp: {v}");
+        assert!(v.get("httpPort").is_some(), "falta httpPort: {v}");
+        assert!(v.get("httpsPort").is_some(), "falta httpsPort: {v}");
+    }
+
+    #[test]
+    fn siteconfig_roundtrip_camelcase() {
+        let s = site();
+        let v = serde_json::to_value(&s).unwrap();
+        // Claves espejo de types.ts (camelCase + renames de DbService).
+        for k in [
+            "createdAt",
+            "oneClickAdmin",
+            "xdebugEnabled",
+            "frontendFramework",
+            "migrationPending",
+            "lastMigratedAt",
+        ] {
+            assert!(v.get(k).is_some(), "falta clave {k} en {v}");
+        }
+        assert_eq!(v["services"]["db"]["type"], "mysql");
+        assert!(v["services"]["db"].get("dbName").is_some());
+
+        // Deserializa de vuelta sin pérdida.
+        let back: SiteConfig = serde_json::from_value(v).unwrap();
+        assert_eq!(back.id, s.id);
+        assert_eq!(back.domain, s.domain);
+        assert!(back.migration_pending);
+    }
+}

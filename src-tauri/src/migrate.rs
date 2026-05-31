@@ -10,7 +10,7 @@ use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 
 use crate::config::{write_site_config, SiteConfig};
 use crate::docker::DockerManager;
@@ -25,8 +25,8 @@ pub struct Migration {
     pub note: Option<String>,
 }
 
-pub async fn migrate_site(
-    app: &AppHandle,
+pub async fn migrate_site<R: Runtime>(
+    app: &AppHandle<R>,
     docker: &DockerManager,
     site: &SiteConfig,
 ) -> Result<Migration> {

@@ -73,3 +73,103 @@ pub fn rotate_dumps(site: &SiteConfig, keep: usize) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::rotate_dumps;
+    use crate::config::{
+        DbService, DbType, NginxService, PhpService, Services, SiteConfig,
+    };
+    use crate::config::GithubConfig;
+    use std::fs::File;
+    use std::time::{Duration, SystemTime};
+
+    fn site_en(path: &std::path::Path) -> SiteConfig {
+        SiteConfig {
+            id: "test".into(),
+            name: "Test".into(),
+            path: path.to_string_lossy().into_owned(),
+            domain: "test.test".into(),
+            group: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            services: Services {
+                php: PhpService { version: "8.3".into() },
+                nginx: NginxService { ssl: true },
+                db: DbService {
+                    db_type: DbType::Mysql,
+                    version: "8.0".into(),
+                    db_name: "test".into(),
+                },
+            },
+            github: GithubConfig::default(),
+            one_click_admin: true,
+            xdebug_enabled: false,
+            headless: false,
+            frontend_framework: None,
+            minio: false,
+            migration_pending: false,
+            last_migrated_at: None,
+        }
+    }
+
+    /// Crea `name` con un mtime = base + `offset_secs` (mtime mayor = más nuevo).
+    fn dump(dir: &std::path::Path, name: &str, base: SystemTime, offset_secs: u64) {
+        let f = File::create(dir.join(name)).unwrap();
+        f.set_modified(base + Duration::from_secs(offset_secs)).unwrap();
+    }
+
+    #[test]
+    fn rotate_conserva_los_n_mas_recientes_e_ignora_ruido() {
+        let tmp = tempfile::tempdir().unwrap();
+        let site = site_en(tmp.path());
+        let sql = site.sql_dir();
+        std::fs::create_dir_all(&sql).unwrap();
+
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        // 5 dumps, db-5 el más nuevo.
+        for i in 1..=5 {
+            dump(&sql, &format!("db-{i}.sql"), base, i * 10);
+        }
+        // Ruido que NO debe tocarse.
+        dump(&sql, "imported.sql", base, 1);
+        dump(&sql, "local.sql", base, 1);
+
+        rotate_dumps(&site, 3).unwrap();
+
+        let mut quedan: Vec<String> = std::fs::read_dir(&sql)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        quedan.sort();
+
+        // Quedan los 3 db-* más recientes (3,4,5) + el ruido intacto.
+        assert_eq!(
+            quedan,
+            vec![
+                "db-3.sql".to_string(),
+                "db-4.sql".to_string(),
+                "db-5.sql".to_string(),
+                "imported.sql".to_string(),
+                "local.sql".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn rotate_no_borra_si_hay_menos_o_igual_que_keep() {
+        let tmp = tempfile::tempdir().unwrap();
+        let site = site_en(tmp.path());
+        let sql = site.sql_dir();
+        std::fs::create_dir_all(&sql).unwrap();
+
+        let base = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        dump(&sql, "db-1.sql", base, 10);
+        dump(&sql, "db-2.sql", base, 20);
+
+        rotate_dumps(&site, 3).unwrap();
+
+        let n = std::fs::read_dir(&sql).unwrap().count();
+        assert_eq!(n, 2);
+    }
+}

@@ -1,0 +1,223 @@
+//! Tests de integración (Pieza 1b del plan de testing).
+//!
+//! Viven dentro del crate (no en `tests/`) para poder usar los módulos privados
+//! (`config`, `docker`, `wordpress`, `migrate`, `localwp`). Todos van marcados
+//! `#[ignore]`: NO corren en `cargo test` (rápido, sin Docker), solo bajo
+//!
+//! ```text
+//! cargo test -- --ignored --test-threads=1
+//! ```
+//!
+//! `--test-threads=1` es obligatorio: varios de estos tests redirigen variables
+//! de entorno del proceso (`HOME`, `XDG_CONFIG_HOME`) o tocan infraestructura
+//! Docker compartida, y correrlos en paralelo se pisaría.
+//!
+//! ## Prerequisitos de los tests con Docker
+//! - Docker corriendo y accesible para el usuario.
+//! - Red `panel-net` (la crea `ensure_network`, o `bash scripts/first-run.sh`).
+//! - Salida a internet (descargan el core de WordPress y, la 1ª vez, construyen
+//!   la imagen `panel-php`).
+//!
+//! El test de import desde LocalVP es **hermético** (no usa Docker): monta un
+//! `HOME` temporal con un `sites.json` y una carpeta de sitio falsos.
+
+use crate::config::{
+    self, DbService, DbType, GithubConfig, NginxService, PhpService, Services, SiteConfig,
+};
+use crate::docker::DockerManager;
+use crate::wordpress::{self, NewSiteRequest};
+
+/// AppHandle simulado para los flujos que emiten progreso (`migrate`, `import`).
+/// Devuelve el `App` (hay que mantenerlo vivo) — usar `app.handle()`.
+fn mock() -> tauri::App<tauri::test::MockRuntime> {
+    tauri::test::mock_app()
+}
+
+/// Nombre de proyecto único para no chocar con proyectos reales del usuario.
+fn scratch_name() -> String {
+    format!("zztest-{}", &uuid::Uuid::new_v4().to_string()[..8])
+}
+
+/// Borra container + carpeta de un proyecto de prueba (best-effort).
+async fn teardown(docker: &DockerManager, site: &SiteConfig) {
+    docker.stop_site(site, &[]).await.ok();
+    docker.remove_container(&site.container_name()).await.ok();
+    std::fs::remove_dir_all(&site.path).ok();
+}
+
+fn req_para(nombre: &str) -> NewSiteRequest {
+    NewSiteRequest {
+        name: nombre.to_string(),
+        domain: None,
+        wp_version: "latest".to_string(),
+        locale: "en_US".to_string(),
+        php_version: "8.3".to_string(),
+        db_type: DbType::Mysql,
+        db_version: "8.0".to_string(),
+        admin_user: "admin".to_string(),
+        admin_password: "admin".to_string(),
+        admin_email: "admin@test.test".to_string(),
+        title: "Test".to_string(),
+        ssl: false, // evita depender de la CA de mkcert en el test
+        one_click_admin: false,
+        xdebug: false,
+        headless: false,
+        frontend_framework: None,
+        minio: false,
+        group: Some("zztest".to_string()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hermético (sin Docker): importar desde LocalWP
+// ---------------------------------------------------------------------------
+
+#[test]
+#[ignore = "muta HOME/XDG; correr con --ignored --test-threads=1"]
+fn import_localwp_hermetico() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let xdg = home.join(".config");
+    std::fs::create_dir_all(&xdg).unwrap();
+
+    // Sitio LocalWP falso: app/public + app/sql/local.sql.
+    let lw = home.join("Local Sites").join("Mi Sitio");
+    let public = lw.join("app").join("public");
+    std::fs::create_dir_all(&public).unwrap();
+    std::fs::write(public.join("index.php"), "<?php // fake wp\n").unwrap();
+    let sql = lw.join("app").join("sql");
+    std::fs::create_dir_all(&sql).unwrap();
+    std::fs::write(sql.join("local.sql"), "-- dump\nSELECT 1;\n").unwrap();
+
+    // sites.json (formato Flywheel/Local): mapa por id.
+    let sites_json = serde_json::json!({
+        "ABC123": {
+            "name": "Mi Sitio",
+            "path": lw.to_string_lossy(),
+            "services": { "php": { "version": "8.4.10" }, "mysql": { "version": "8.0.35" } },
+            "multiSite": "",
+            "xdebugEnabled": false
+        }
+    });
+    let local_dir = xdg.join("Local");
+    std::fs::create_dir_all(&local_dir).unwrap();
+    std::fs::write(
+        local_dir.join("sites.json"),
+        serde_json::to_string_pretty(&sites_json).unwrap(),
+    )
+    .unwrap();
+
+    // Redirigir el entorno a los temporales (dirs:: respeta HOME/XDG_CONFIG_HOME).
+    std::env::set_var("HOME", &home);
+    std::env::set_var("XDG_CONFIG_HOME", &xdg);
+
+    let app = mock();
+    let result = crate::localwp::import_site(app.handle(), "ABC123").expect("import");
+
+    let site = &result.site;
+    assert!(site.migration_pending, "debe quedar migrationPending");
+    assert_eq!(site.domain, "mi-sitio.test", "dominio derivado del slug .test");
+    assert_eq!(site.services.php.version, "8.4"); // 8.4.10 → 8.4 (soportada)
+
+    // El proyecto se creó bajo {HOME}/panel-wp/{slug}.
+    let proj = home.join("panel-wp").join("mi-sitio");
+    assert!(proj.join("config.json").exists(), "config.json creado");
+    assert!(
+        proj.join("app/public/index.php").exists(),
+        "app/public copiado"
+    );
+    assert!(
+        proj.join("app/sql/imported.sql").exists(),
+        "dump copiado como imported.sql"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Con Docker
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "requiere Docker; correr con --ignored --test-threads=1"]
+async fn db_lifecycle_idempotente() {
+    let docker = DockerManager::connect().expect("conectar a Docker");
+    docker.ensure_network().await.expect("panel-net");
+
+    // SiteConfig mínimo solo para crear su base de datos (sin tocar disco/WP).
+    let slug = scratch_name();
+    let cfg = SiteConfig {
+        id: slug.clone(),
+        name: slug.clone(),
+        path: config::projects_root().unwrap().join(&slug).to_string_lossy().into_owned(),
+        domain: format!("{slug}.test"),
+        group: Some("zztest".into()),
+        created_at: "2026-01-01T00:00:00Z".into(),
+        services: Services {
+            php: PhpService { version: "8.3".into() },
+            nginx: NginxService { ssl: false },
+            db: DbService {
+                db_type: DbType::Mysql,
+                version: "8.0".into(),
+                db_name: format!("{}_db", slug.replace('-', "_")),
+            },
+        },
+        github: GithubConfig::default(),
+        one_click_admin: false,
+        xdebug_enabled: false,
+        headless: false,
+        frontend_framework: None,
+        minio: false,
+        migration_pending: false,
+        last_migrated_at: None,
+    };
+
+    let db_container = docker.ensure_db(&cfg.services.db).await.expect("ensure_db");
+    assert!(docker.is_running(&db_container).await, "DB compartida arriba");
+
+    // create_database dos veces = idempotente (no debe fallar).
+    wordpress::create_database(&docker, &db_container, &cfg)
+        .await
+        .expect("create_database 1");
+    wordpress::create_database(&docker, &db_container, &cfg)
+        .await
+        .expect("create_database 2 (idempotente)");
+
+    // No tocamos la DB compartida (infra del panel); nada que limpiar.
+}
+
+#[tokio::test]
+#[ignore = "e2e pesado: descarga WordPress y construye imagen; --ignored --test-threads=1"]
+async fn crear_exportar_migrar_e2e() {
+    let docker = DockerManager::connect().expect("conectar a Docker");
+    docker.ensure_network().await.expect("panel-net");
+
+    let site = wordpress::create_site(&docker, req_para(&scratch_name()))
+        .await
+        .expect("create_site");
+
+    // export_db deja un dump en app/sql/db-*.sql.
+    crate::backup::export_db(&docker, &site).await.expect("export_db");
+    let n = std::fs::read_dir(site.sql_dir())
+        .unwrap()
+        .flatten()
+        .filter(|e| {
+            let n = e.file_name();
+            let n = n.to_string_lossy();
+            n.starts_with("db-") && n.ends_with(".sql")
+        })
+        .count();
+    assert!(n >= 1, "debe existir al menos un dump db-*.sql");
+
+    crate::backup::rotate_dumps(&site, 3).expect("rotate_dumps");
+
+    // migrate_site reprovisiona sobre el mismo sitio (idempotente): reimporta el
+    // último dump y deja migration_pending=false.
+    let app = mock();
+    let mut pendiente = site.clone();
+    pendiente.migration_pending = true;
+    let mig = crate::migrate::migrate_site(app.handle(), &docker, &pendiente)
+        .await
+        .expect("migrate_site");
+    assert!(!mig.site.migration_pending, "tras migrar: no pendiente");
+
+    teardown(&docker, &site).await;
+}

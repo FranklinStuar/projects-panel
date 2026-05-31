@@ -20,6 +20,9 @@ mod system;
 mod wordpress;
 mod wpcli;
 
+#[cfg(test)]
+mod integration_tests;
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 

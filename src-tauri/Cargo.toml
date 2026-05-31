@@ -42,6 +42,13 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 
+[dev-dependencies]
+# Tests: directorios temporales para lógica de ficheros (rotate_dumps, import).
+tempfile = "3"
+# Feature `test` de Tauri: construir un AppHandle simulado en tests de integración
+# (los comandos migrate/import reciben &AppHandle para emitir progreso `op-log`).
+tauri = { version = "2", features = ["test"] }
+
 [features]
 # default Tauri feature set placeholder
 default = []

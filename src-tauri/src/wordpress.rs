@@ -400,3 +400,32 @@ pub(crate) fn slugify(name: &str) -> String {
         .collect::<Vec<_>>()
         .join("-")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::slugify;
+
+    #[test]
+    fn slugify_basico() {
+        assert_eq!(slugify("Mi Sitio Web"), "mi-sitio-web");
+    }
+
+    #[test]
+    fn slugify_simbolos_y_trim() {
+        // signos no alfanuméricos → separadores; extremos recortados.
+        assert_eq!(slugify("  ¡Hola, Mundo!  "), "hola-mundo");
+        assert_eq!(slugify("foo___bar"), "foo-bar");
+        assert_eq!(slugify("--a--b--"), "a-b");
+    }
+
+    #[test]
+    fn slugify_colapsa_separadores() {
+        assert_eq!(slugify("a   b...c"), "a-b-c");
+    }
+
+    #[test]
+    fn slugify_alfanumerico_unicode() {
+        // is_alphanumeric acepta dígitos y letras; el espacio se vuelve guion.
+        assert_eq!(slugify("WP 2024 v2"), "wp-2024-v2");
+    }
+}

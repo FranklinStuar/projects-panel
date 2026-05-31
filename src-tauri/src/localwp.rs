@@ -11,7 +11,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 use uuid::Uuid;
 
 use crate::config::{
@@ -133,7 +133,7 @@ pub fn list_sites() -> Result<Vec<LocalSite>> {
 }
 
 /// Importa un sitio de LocalWP creando un proyecto del panel (sin DB todavía).
-pub fn import_site(app: &AppHandle, local_id: &str) -> Result<ImportResult> {
+pub fn import_site<R: Runtime>(app: &AppHandle<R>, local_id: &str) -> Result<ImportResult> {
     let map = read_raw()?;
     let r = map
         .get(local_id)
@@ -278,5 +278,32 @@ fn pick_supported(v: &str, supported: &[&str]) -> (String, bool) {
         (v.to_string(), false)
     } else {
         (supported.last().unwrap().to_string(), true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{major_minor, pick_supported, MYSQL_SUPPORTED, PHP_SUPPORTED};
+
+    #[test]
+    fn major_minor_recorta_patch() {
+        assert_eq!(major_minor("8.4.10"), "8.4");
+        assert_eq!(major_minor("7.4"), "7.4");
+        assert_eq!(major_minor("8"), "8");
+        assert_eq!(major_minor(""), "");
+    }
+
+    #[test]
+    fn pick_supported_soportada_sin_ajuste() {
+        assert_eq!(pick_supported("8.3", PHP_SUPPORTED), ("8.3".into(), false));
+        assert_eq!(pick_supported("8.0", MYSQL_SUPPORTED), ("8.0".into(), false));
+    }
+
+    #[test]
+    fn pick_supported_no_soportada_usa_mas_reciente() {
+        // PHP antiguo → último soportado, marcado como ajustado.
+        assert_eq!(pick_supported("5.6", PHP_SUPPORTED), ("8.4".into(), true));
+        // MySQL intermedio no listado → 8.4 (último de la lista).
+        assert_eq!(pick_supported("8.2", MYSQL_SUPPORTED), ("8.4".into(), true));
     }
 }
