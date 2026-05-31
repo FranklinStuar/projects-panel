@@ -1,12 +1,20 @@
 //! Panel WP — backend Tauri.
 
+mod autologin;
 mod config;
 mod docker;
 mod domain;
+mod logs;
 mod nginx;
 mod php;
 mod wordpress;
 mod wpcli;
+
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+use tauri::{AppHandle, State};
+use tokio::task::JoinHandle;
 
 use config::{SiteConfig, SiteState};
 use docker::DockerManager;
@@ -17,6 +25,10 @@ type CmdResult<T> = Result<T, String>;
 fn e<E: std::fmt::Display>(err: E) -> String {
     err.to_string()
 }
+
+/// Tareas de streaming de logs activas, por id de proyecto.
+#[derive(Default)]
+struct LogStreams(Mutex<HashMap<String, JoinHandle<()>>>);
 
 /// Lista todos los proyectos con su estado real (running / stopped / pending).
 #[tauri::command]
@@ -82,20 +94,68 @@ async fn list_wp_versions() -> CmdResult<Vec<WpVersion>> {
     wordpress::fetch_versions().await.map_err(e)
 }
 
+/// Abre el admin en el navegador (auto-login si el proyecto lo tiene activado).
+#[tauri::command]
+async fn open_admin(app: AppHandle, id: String) -> CmdResult<()> {
+    let site = config::find_site(&id)
+        .map_err(e)?
+        .ok_or_else(|| format!("proyecto {id} no encontrado"))?;
+    let docker = DockerManager::connect().map_err(e)?;
+    autologin::open_admin(&app, &docker, &site).await.map_err(e)
+}
+
+/// Empieza a emitir eventos `log:{id}` con los logs del container del proyecto.
+#[tauri::command]
+async fn stream_logs(app: AppHandle, state: State<'_, LogStreams>, id: String) -> CmdResult<()> {
+    {
+        let map = state.0.lock().unwrap();
+        if map.contains_key(&id) {
+            return Ok(()); // ya hay un stream activo
+        }
+    }
+    let handle = logs::spawn_stream(app, id.clone()).map_err(e)?;
+    state.0.lock().unwrap().insert(id, handle);
+    Ok(())
+}
+
+#[tauri::command]
+async fn stop_logs(state: State<'_, LogStreams>, id: String) -> CmdResult<()> {
+    let handle = state.0.lock().unwrap().remove(&id);
+    if let Some(h) = handle {
+        h.abort();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_plugins(id: String) -> CmdResult<String> {
+    wpcli_json(&id, &["plugin", "list", "--format=json"]).await
+}
+
+#[tauri::command]
+async fn list_themes(id: String) -> CmdResult<String> {
+    wpcli_json(&id, &["theme", "list", "--format=json"]).await
+}
+
+/// Helper: ejecuta WP-CLI y devuelve la salida (esperada en JSON).
+async fn wpcli_json(id: &str, args: &[&str]) -> CmdResult<String> {
+    let site = config::find_site(id)
+        .map_err(e)?
+        .ok_or_else(|| format!("proyecto {id} no encontrado"))?;
+    let docker = DockerManager::connect().map_err(e)?;
+    let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    wpcli::run(&docker, &site, &owned).await.map_err(e)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // En Linux/Wayland (KDE), GTK usa decoración cliente (CSD) por defecto, que
-    // pinta los botones de la ventana a la derecha e ignora la config del usuario.
-    // GTK_CSD=0 hace que GTK pida decoración al servidor (KWin), que sí respeta
-    // kwinrc → los botones aparecen donde el usuario los configure (izq/der).
-    #[cfg(target_os = "linux")]
-    if std::env::var_os("GTK_CSD").is_none() {
-        std::env::set_var("GTK_CSD", "0");
-    }
-
+    // NOTA: la posición de los botones de la barra de título (deben respetar la
+    // config del usuario en KDE) queda pendiente — ver docs/KNOWN_ISSUES.md.
+    // Se revisará al finalizar todas las fases.
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .manage(LogStreams::default())
         .invoke_handler(tauri::generate_handler![
             get_sites,
             start_site,
@@ -103,7 +163,12 @@ pub fn run() {
             stop_all_sites,
             exec_wpcli,
             create_site,
-            list_wp_versions
+            list_wp_versions,
+            open_admin,
+            stream_logs,
+            stop_logs,
+            list_plugins,
+            list_themes
         ])
         .run(tauri::generate_context!())
         .expect("error al arrancar la aplicación Tauri");

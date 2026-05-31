@@ -38,8 +38,31 @@ Cimientos de la optimización de recursos.
 - WP-CLI wrapper instalado en `~/.local/bin/` + binario `wordpress-panel-cli`.
 - Verificación end-to-end de una provisión completa de WordPress real.
 
-## Fase 2+ — Pendiente
+## Fase 2 — Funcionalidades completas (en curso)
 
-Ver `PLAN.md`: D-Bus + plasmoid KDE, logs en vivo, SSL con mkcert, auto-login
-(mu-plugin token), themes/plugins, GitHub vía `gh`, grupos; luego MinIO,
-MariaDB/Postgres, headless, migración, import LocalWP; y Fase 5 IA (`agent.rs`).
+### Hecho
+- **Logs en vivo** (`logs.rs`): stream `follow` de los logs del container →
+  eventos `log:{id}`; tab "Logs" en la vista de proyecto con autoscroll del
+  buffer (últimas 500 líneas). Start/stop atado al tab + estado `LogStreams`.
+- **Auto-login one-click** (`autologin.rs` + mu-plugin `panel-autologin.php`):
+  token efímero de un solo uso (transient WP 60s) → botón "Abrir admin" abre el
+  navegador logueado. Inyectado en `create_site` si `oneClickAdmin`.
+- **Listado de plugins/themes** (`list_plugins`/`list_themes` vía WP-CLI JSON);
+  tab "Plugins / Themes" en la vista de proyecto.
+- **Vista de proyecto con tabs** (Info / Logs / Plugins-Themes) + start/stop.
+
+### Pendiente de Fase 2
+- D-Bus (`dbus.rs`) + plasmoid KDE.
+- SSL con mkcert (requiere instalar mkcert).
+- GitHub vía `gh` (`github.rs`): clonar/pull themes y plugins.
+- Grupos de proyectos.
+
+## Fase 3+ — Pendiente
+
+Ver `PLAN.md`: MinIO, MariaDB/Postgres, headless, migración, import LocalWP; y
+Fase 5 IA (`agent.rs`).
+
+## Diferido (fuera de fase)
+
+- **Botones de la barra de título** no respetan la config de KDE — ver
+  `docs/KNOWN_ISSUES.md`. Se revisará al finalizar todas las fases.

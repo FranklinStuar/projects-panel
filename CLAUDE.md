@@ -75,6 +75,8 @@ scripts/                 first-run.sh, wp-wrapper.sh
 ## Estado actual
 
 Fase 1 completa (scaffold, núcleo Docker, dashboard, dnsmasq) + formulario Nuevo
-Proyecto. Ver `docs/CHANGELOG.md` para el detalle y `PLAN.md` para lo pendiente
-(Fase 2: plasmoid KDE, logs en vivo, SSL/mkcert, auto-login; Fase 3+: MinIO,
-MariaDB/Postgres, migración, IA).
+Proyecto. Fase 2 en curso: logs en vivo, auto-login one-click, plugins/themes,
+vista de proyecto con tabs. Ver `docs/CHANGELOG.md` para el detalle y `PLAN.md`
+para lo pendiente (Fase 2 restante: plasmoid KDE+D-Bus, SSL/mkcert, GitHub,
+grupos; Fase 3+: MinIO, MariaDB/Postgres, migración, IA). Tema diferido:
+botones de la barra de título (`docs/KNOWN_ISSUES.md`).

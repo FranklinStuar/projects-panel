@@ -154,8 +154,11 @@ pub async fn create_site(docker: &DockerManager, req: NewSiteRequest) -> Result<
     // 5. descargar core WordPress (tarball)
     download_core(&req.wp_version, &site.public_dir()).await?;
 
-    // 6. mu-plugin mailpit
+    // 6. mu-plugins: mailpit (siempre) + auto-login (si one-click)
     inject_mailpit_muplugin(&site)?;
+    if site.one_click_admin {
+        inject_autologin_muplugin(&site)?;
+    }
 
     // 7. encender container php + vhost + nginx
     docker.start_site(&site).await?;
@@ -327,6 +330,37 @@ fn inject_mailpit_muplugin(site: &SiteConfig) -> Result<()> {
     std::fs::write(dir.join("panel-mailpit.php"), content)?;
     Ok(())
 }
+
+/// Inyecta el mu-plugin de auto-login (token efímero de un solo uso).
+fn inject_autologin_muplugin(site: &SiteConfig) -> Result<()> {
+    let dir = site.public_dir().join("wp-content").join("mu-plugins");
+    std::fs::create_dir_all(&dir)?;
+    let tmpl = crate::docker::docker_assets_dir()
+        .join("mu-plugins")
+        .join("panel-autologin.php");
+    let content = std::fs::read_to_string(&tmpl)
+        .unwrap_or_else(|_| DEFAULT_AUTOLOGIN_MUPLUGIN.to_string());
+    std::fs::write(dir.join("panel-autologin.php"), content)?;
+    Ok(())
+}
+
+const DEFAULT_AUTOLOGIN_MUPLUGIN: &str = r#"<?php
+defined( 'ABSPATH' ) || exit;
+add_action( 'init', function () {
+    if ( empty( $_GET['panel_autologin'] ) ) { return; }
+    $token = preg_replace( '/[^a-z0-9]/i', '', (string) $_GET['panel_autologin'] );
+    if ( $token === '' ) { return; }
+    $key = 'panel_autologin_' . $token;
+    if ( get_transient( $key ) === false ) { return; }
+    delete_transient( $key );
+    $admins = get_users( array( 'role' => 'administrator', 'number' => 1 ) );
+    if ( empty( $admins ) ) { return; }
+    wp_set_current_user( $admins[0]->ID );
+    wp_set_auth_cookie( $admins[0]->ID, true );
+    wp_safe_redirect( admin_url() );
+    exit;
+} );
+"#;
 
 const DEFAULT_MAILPIT_MUPLUGIN: &str = r#"<?php
 /**

@@ -10,5 +10,10 @@ export const api = {
   stopAllSites: () => invoke<void>('stop_all_sites'),
   execWpcli: (id: string, args: string[]) => invoke<string>('exec_wpcli', { id, args }),
   createSite: (req: NewSiteRequest) => invoke<SiteConfig>('create_site', { req }),
-  listWpVersions: () => invoke<WpVersion[]>('list_wp_versions')
+  listWpVersions: () => invoke<WpVersion[]>('list_wp_versions'),
+  openAdmin: (id: string) => invoke<void>('open_admin', { id }),
+  streamLogs: (id: string) => invoke<void>('stream_logs', { id }),
+  stopLogs: (id: string) => invoke<void>('stop_logs', { id }),
+  listPlugins: (id: string) => invoke<string>('list_plugins', { id }),
+  listThemes: (id: string) => invoke<string>('list_themes', { id })
 };
