@@ -6,7 +6,7 @@
 //! datos, regenera `wp-config.php` con las credenciales del panel, importa el
 //! último dump de `app/sql/`, regenera el certificado SSL y enciende el sitio.
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -52,7 +52,7 @@ pub async fn migrate_site(docker: &DockerManager, site: &SiteConfig) -> Result<M
     // 5. Importar el último dump si existe; si no, el sitio arranca vacío.
     let note = match latest_dump(site) {
         Some(dump) => {
-            import_dump(docker, site, &dump).await?;
+            import_dump(docker, site, &db_container, &dump).await?;
             // El dump pudo venir con otro dominio (p. ej. LocalWP `.local`):
             // fijar home/siteurl al dominio del panel para que el admin funcione.
             fix_site_url(docker, site).await.ok();
@@ -112,23 +112,25 @@ async fn fix_site_url(docker: &DockerManager, site: &SiteConfig) -> Result<()> {
     Ok(())
 }
 
-/// Importa un dump SQL vía WP-CLI. `app/sql/` no está montado en el container,
-/// así que se copia el dump a la raíz pública (montada en `/var/www/html`), se
-/// importa y se borra.
-async fn import_dump(docker: &DockerManager, site: &SiteConfig, dump: &Path) -> Result<()> {
-    let staged_name = "panel-import.sql";
-    let staged = site.public_dir().join(staged_name);
-    std::fs::copy(dump, &staged)?;
-    let res = crate::wpcli::run(
-        docker,
-        site,
-        &[
-            "db".to_string(),
-            "import".to_string(),
-            format!("/var/www/html/{staged_name}"),
-        ],
-    )
-    .await;
-    std::fs::remove_file(&staged).ok();
-    res.map(|_| ())
+/// Importa un dump SQL alimentando el cliente `mysql` del container DB por
+/// stdin. Se hace dentro del container DB (socket local, sin TLS) en vez de con
+/// `wp db import` desde el container php, cuyo cliente falla la verificación del
+/// certificado autofirmado de MySQL 8.
+async fn import_dump(
+    docker: &DockerManager,
+    site: &SiteConfig,
+    db_container: &str,
+    dump: &Path,
+) -> Result<()> {
+    let bytes = std::fs::read(dump)
+        .with_context(|| format!("leyendo el dump {:?}", dump))?;
+    let dbname = &site.services.db.db_name;
+    docker
+        .exec_stdin(
+            db_container,
+            vec!["mysql", "-uroot", "-ppanel", dbname],
+            &bytes,
+        )
+        .await?;
+    Ok(())
 }

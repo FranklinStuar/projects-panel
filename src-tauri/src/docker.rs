@@ -6,10 +6,11 @@
 
 use anyhow::{anyhow, Context, Result};
 use bollard::container::{
-    Config, CreateContainerOptions, ListContainersOptions, RemoveContainerOptions,
+    Config, CreateContainerOptions, ListContainersOptions, LogOutput, RemoveContainerOptions,
     StartContainerOptions, StopContainerOptions,
 };
 use bollard::exec::{CreateExecOptions, StartExecResults};
+use tokio::io::AsyncWriteExt;
 use bollard::image::CreateImageOptions;
 use bollard::models::{HostConfig, PortBinding};
 use bollard::network::CreateNetworkOptions;
@@ -148,11 +149,7 @@ impl DockerManager {
     /// Arranca (si hace falta) el container DB compartido para una versión.
     /// Devuelve el nombre del container (`panel-mysql-80`, ...).
     pub async fn ensure_db(&self, db: &DbService) -> Result<String> {
-        let name = format!(
-            "{}-{}",
-            db.db_type.service_prefix(),
-            db.version.replace('.', "")
-        );
+        let name = db_container_name(db);
         if self.is_running(&name).await {
             return Ok(name);
         }
@@ -774,11 +771,114 @@ impl DockerManager {
         }
         Ok(out)
     }
+
+    /// Ejecuta un comando alimentando `input` por stdin (p. ej. importar un dump
+    /// SQL en el cliente `mysql` del container DB). El cliente conecta por socket
+    /// local → sin TLS (evita el "self-signed certificate" del MySQL 8).
+    pub async fn exec_stdin(&self, container: &str, cmd: Vec<&str>, input: &[u8]) -> Result<String> {
+        let exec = self
+            .docker
+            .create_exec(
+                container,
+                CreateExecOptions {
+                    cmd: Some(cmd.iter().map(|s| s.to_string()).collect()),
+                    attach_stdin: Some(true),
+                    attach_stdout: Some(true),
+                    attach_stderr: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await
+            .with_context(|| format!("create_exec (stdin) en {container}"))?;
+
+        let mut out = String::new();
+        if let StartExecResults::Attached {
+            mut output,
+            input: mut stdin,
+        } = self.docker.start_exec(&exec.id, None).await?
+        {
+            // El dump entra entero y luego se cierra stdin (EOF). El stdout del
+            // cliente mysql es mínimo, así que escribir-luego-leer no bloquea.
+            stdin.write_all(input).await?;
+            stdin.flush().await?;
+            drop(stdin);
+            while let Some(chunk) = output.next().await {
+                out.push_str(&chunk?.to_string());
+            }
+        }
+
+        let inspect = self.docker.inspect_exec(&exec.id).await?;
+        if let Some(code) = inspect.exit_code {
+            if code != 0 {
+                let cmd = cmd.join(" ");
+                return Err(anyhow!(
+                    "`{cmd}` falló en {container} (código {code}): {}",
+                    out.trim()
+                ));
+            }
+        }
+        Ok(out)
+    }
+
+    /// Ejecuta un comando y captura su **stdout** como bytes (stderr aparte, para
+    /// el mensaje de error). Para volcados binarios/grandes como `mysqldump`.
+    pub async fn exec_capture(&self, container: &str, cmd: Vec<&str>) -> Result<Vec<u8>> {
+        let exec = self
+            .docker
+            .create_exec(
+                container,
+                CreateExecOptions {
+                    cmd: Some(cmd.iter().map(|s| s.to_string()).collect()),
+                    attach_stdout: Some(true),
+                    attach_stderr: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await
+            .with_context(|| format!("create_exec (capture) en {container}"))?;
+
+        let mut stdout: Vec<u8> = Vec::new();
+        let mut stderr = String::new();
+        if let StartExecResults::Attached { mut output, .. } =
+            self.docker.start_exec(&exec.id, None).await?
+        {
+            while let Some(chunk) = output.next().await {
+                match chunk? {
+                    LogOutput::StdOut { message } => stdout.extend_from_slice(&message),
+                    LogOutput::StdErr { message } => {
+                        stderr.push_str(&String::from_utf8_lossy(&message))
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        let inspect = self.docker.inspect_exec(&exec.id).await?;
+        if let Some(code) = inspect.exit_code {
+            if code != 0 {
+                let cmd = cmd.join(" ");
+                return Err(anyhow!(
+                    "`{cmd}` falló en {container} (código {code}): {}",
+                    stderr.trim()
+                ));
+            }
+        }
+        Ok(stdout)
+    }
 }
 
 // ---------------------------------------------------------------------------
 // helpers libres
 // ---------------------------------------------------------------------------
+
+/// Nombre del container DB compartido para un servicio (`panel-mysql-80`).
+pub fn db_container_name(db: &DbService) -> String {
+    format!(
+        "{}-{}",
+        db.db_type.service_prefix(),
+        db.version.replace('.', "")
+    )
+}
 
 /// uid/gid del usuario host, para mapear www-data dentro del container.
 pub fn host_uid_gid() -> (u32, u32) {

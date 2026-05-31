@@ -221,15 +221,23 @@ estado, pero no había forma de migrar ni de exportar la DB al apagar.
   `kpackagetool6 --install`. Idempotente. `first-run.sh` lo menciona; `dist/`
   ignorado en git.
 
-### Fix — WP-CLI `db import`/`export` necesitaba el cliente mysql
+### Fix — import/export de DB: hacerlo en el container DB (sin TLS)
 
-`wp db import/export` (backup, migración, import LocalWP) ejecuta `mysql`/
-`mysqldump`, que no estaban en la imagen php-fpm (alpine) → `env: can't execute
-'mysql'`. La imagen ahora instala `mariadb-client` (aporta los symlinks
-`mysql`/`mysqldump`). Para que el cambio aterrice sin `docker rmi` manual, el tag
-de imagen lleva una revisión (`panel-php:{ver}-{rev}`, `php::IMAGE_REV`): al
-subirla, `ensure_php_image` reconstruye y `start_site` **recrea** los containers
-que aún usen el tag viejo (compara `container_image` con el tag deseado).
+`wp db import/export` desde el container php fallaba en cadena: primero
+`env: can't execute 'mysql'` (sin cliente en la imagen), luego —con el cliente—
+`TLS/SSL error: self-signed certificate` (MySQL 8 ofrece TLS con cert
+autofirmado y el cliente mariadb lo verifica). Solución: **import/export se
+ejecutan dentro del container DB** (`panel-mysql-*`) por socket local, sin TLS:
+- `docker.rs`: `exec_stdin` (alimenta `mysql` por stdin → importar dump) y
+  `exec_capture` (captura stdout de `mysqldump` → exportar). Helper
+  `db_container_name`.
+- `migrate.rs` importa el último dump con `exec_stdin`; `backup.rs` exporta con
+  `mysqldump --single-transaction` vía `exec_capture` (antes movía un archivo
+  desde la raíz pública).
+- La imagen php suma `mariadb-client` (para `wp db` desde el wrapper de terminal)
+  y el tag lleva revisión (`panel-php:{ver}-{rev}`, `php::IMAGE_REV`): al subirla
+  `ensure_php_image` reconstruye y `start_site` **recrea** los containers con tag
+  viejo (compara `container_image`).
 
 ### Fix — migración: generar SSL antes de encender
 

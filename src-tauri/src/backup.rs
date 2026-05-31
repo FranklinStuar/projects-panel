@@ -1,49 +1,50 @@
-//! Backup de proyecto: export de la base de datos vía WP-CLI.
+//! Backup de proyecto: export de la base de datos.
 //!
-//! `wp db export` escribe el dump dentro del container, en la raíz pública
-//! (`/var/www/html`, bind-montada). Luego se mueve en el host a `app/sql/`.
+//! Se ejecuta `mysqldump` DENTRO del container DB (socket local, sin TLS) y se
+//! captura su stdout al host en `app/sql/`. No se usa `wp db export` desde el
+//! container php porque su cliente mariadb falla la verificación del certificado
+//! autofirmado de MySQL 8.
 
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 
 use crate::config::SiteConfig;
-use crate::docker::DockerManager;
+use crate::docker::{db_container_name, DockerManager};
 
 /// Exporta la DB del proyecto a `app/sql/db-{timestamp}.sql`.
 /// Devuelve la ruta del archivo generado.
 pub async fn export_db(docker: &DockerManager, site: &SiteConfig) -> Result<String> {
-    let cname = site.container_name();
-    if !docker.is_running(&cname).await {
-        return Err(anyhow!("el proyecto '{}' no está encendido", site.name));
+    let db_container = db_container_name(&site.services.db);
+    if !docker.is_running(&db_container).await {
+        return Err(anyhow!(
+            "la base de datos de '{}' no está encendida",
+            site.name
+        ));
+    }
+
+    let dbname = &site.services.db.db_name;
+    let dump = docker
+        .exec_capture(
+            &db_container,
+            vec![
+                "mysqldump",
+                "-uroot",
+                "-ppanel",
+                "--single-transaction",
+                "--no-tablespaces",
+                dbname,
+            ],
+        )
+        .await?;
+    if dump.is_empty() {
+        return Err(anyhow!("mysqldump no produjo salida para {dbname}"));
     }
 
     let stamp = Utc::now().format("%Y%m%d-%H%M%S").to_string();
-    let file = format!("db-{stamp}.sql");
-
-    // Exportar dentro del container a la raíz pública (montada en el host).
-    // Vía wpcli::run → corre como www-data (WP-CLI no admite root).
-    let out = crate::wpcli::run(
-        docker,
-        site,
-        &[
-            "db".to_string(),
-            "export".to_string(),
-            format!("/var/www/html/{file}"),
-        ],
-    )
-    .await?;
-
-    let in_public = site.public_dir().join(&file);
-    if !in_public.exists() {
-        return Err(anyhow!("WP-CLI no generó el dump: {out}"));
-    }
-
-    // Mover del público a app/sql/ (fuera de la raíz servida por nginx).
     let sql_dir = site.sql_dir();
     std::fs::create_dir_all(&sql_dir).ok();
-    let dest = sql_dir.join(&file);
-    std::fs::rename(&in_public, &dest)
-        .or_else(|_| std::fs::copy(&in_public, &dest).map(|_| std::fs::remove_file(&in_public).ok()).map(|_| ()))?;
+    let dest = sql_dir.join(format!("db-{stamp}.sql"));
+    std::fs::write(&dest, &dump)?;
 
     Ok(dest.to_string_lossy().to_string())
 }
