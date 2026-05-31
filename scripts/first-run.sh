@@ -1,0 +1,48 @@
+#!/bin/bash
+# Primera configuración de Panel WP en un sistema Linux con KDE + NetworkManager.
+# Idempotente: se puede correr varias veces. Requiere sudo solo para dnsmasq y
+# (si falta) instalar mkcert. Pensado para Manjaro/Arch (pacman).
+set -euo pipefail
+
+echo "==> Panel WP — primera configuración"
+
+# 1. Red Docker compartida ------------------------------------------------------
+if docker network inspect panel-net >/dev/null 2>&1; then
+    echo "  [ok] red docker panel-net ya existe"
+else
+    docker network create --driver bridge panel-net >/dev/null
+    echo "  [+] red docker panel-net creada"
+fi
+
+# 2. dnsmasq wildcard *.test -> 127.0.0.1 --------------------------------------
+# NetworkManager debe usar su dnsmasq integrado (dns=dnsmasq).
+NM_CONF="/etc/NetworkManager/conf.d/dns.conf"
+if ! grep -rqs "dns=dnsmasq" /etc/NetworkManager/ ; then
+    echo "  [+] activando backend dnsmasq en NetworkManager"
+    sudo install -d /etc/NetworkManager/conf.d
+    printf "[main]\ndns=dnsmasq\n" | sudo tee "$NM_CONF" >/dev/null
+fi
+
+SNIPPET="/etc/NetworkManager/dnsmasq.d/wordpress-panel.conf"
+sudo install -d /etc/NetworkManager/dnsmasq.d
+printf "address=/test/127.0.0.1\n" | sudo tee "$SNIPPET" >/dev/null
+echo "  [+] wildcard *.test escrito en $SNIPPET"
+
+sudo systemctl restart NetworkManager
+sleep 3
+if getent hosts panel-probe.test | grep -q 127.0.0.1; then
+    echo "  [ok] *.test resuelve a 127.0.0.1"
+else
+    echo "  [!] *.test aún no resuelve — revisar NetworkManager/dnsmasq"
+fi
+
+# 3. mkcert (CA local para SSL .test) ------------------------------------------
+if command -v mkcert >/dev/null 2>&1; then
+    mkcert -install
+    echo "  [ok] mkcert CA instalada"
+else
+    echo "  [i] mkcert no está instalado (SSL es opcional, Fase 2)."
+    echo "      Instálalo con:  sudo pacman -S nss mkcert"
+fi
+
+echo "==> Listo. Lanza el panel con:  pnpm tauri dev"
