@@ -234,6 +234,15 @@ pub fn save_endpoint(ep: &Endpoint) -> Result<()> {
     save_panel_config(&cfg)
 }
 
+/// Olvida el endpoint persistido: la próxima vez que arranque `panel-nginx` se
+/// vuelve a autodetectar un puerto libre. Solo afecta a sitios creados después
+/// (los ya instalados guardan el `siteurl` con el puerto anterior).
+pub fn clear_endpoint() -> Result<()> {
+    let mut cfg = load_panel_config()?;
+    cfg.endpoint = None;
+    save_panel_config(&cfg)
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum SiteStatus {

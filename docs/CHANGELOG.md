@@ -158,10 +158,28 @@ así `create_site` devolvía Ok:
   para `.input`): fondo navy `zinc-900`, texto `zinc-100`, foco azul, placeholder
   atenuado. `accent-color` azul para checkbox/radio. App ahora dark-only navy.
 
+## Fase 4 — Polish
+
+### Settings completo (estado del sistema + primera configuración)
+
+`src/routes/settings/+page.svelte` pasó de stub a pantalla real.
+
+- **`system.rs`** (nuevo): `system_status()` reúne en una lectura el estado de
+  los prerequisitos — Docker accesible, red `panel-net`, dnsmasq `*.test`, CA de
+  mkcert (`mkcert -CAROOT`/rootCA.pem), wrappers WP-CLI (`~/.local/bin/wp`),
+  plasmoid (`~/.local/share/plasma/plasmoids/{id}`) — más el endpoint y las
+  rutas (projectsRoot, configDir). Best-effort: un chequeo que falla es `false`.
+- **Comandos**: `system_status`, `create_panel_network` (crea `panel-net` si
+  falta, reusa `ensure_network`), `reset_endpoint` (`config::clear_endpoint` →
+  reasigna puerto en el próximo arranque). `docker.rs` gana `network_exists`.
+- **UI**: checklist con semáforo por ítem y botones para lo que no necesita
+  privilegios (crear red, instalar wrappers); las acciones con sudo (dnsmasq,
+  mkcert CA, plasmoid) remiten a `bash scripts/first-run.sh`. Muestra el endpoint
+  (badge URLs limpias / puerto alterno) con botón "Reasignar puerto", y las rutas.
+
 ## Fase 4+ — Pendiente
 
-Ver `PLAN.md`: migración entre sistemas, import LocalWP, settings completo,
-empaquetado del plasmoid; y Fase 5 IA (`agent.rs`).
+Ver `PLAN.md`: Fase 5 IA (`agent.rs`).
 
 ## Diferido (fuera de fase)
 

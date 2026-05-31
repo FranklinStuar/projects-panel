@@ -1,5 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { SiteConfig, SiteState, WpVersion, NewSiteRequest, GhStatus, Endpoint } from './types';
+import type {
+  SiteConfig,
+  SiteState,
+  WpVersion,
+  NewSiteRequest,
+  GhStatus,
+  Endpoint,
+  SystemStatus
+} from './types';
 
 // Capa fina sobre los comandos IPC de Tauri (src-tauri/src/lib.rs).
 
@@ -12,6 +20,10 @@ export const api = {
   createSite: (req: NewSiteRequest) => invoke<SiteConfig>('create_site', { req }),
   listWpVersions: () => invoke<WpVersion[]>('list_wp_versions'),
   panelEndpoint: () => invoke<Endpoint>('panel_endpoint'),
+  // Fase 4: estado del sistema / primera configuración
+  systemStatus: () => invoke<SystemStatus>('system_status'),
+  createPanelNetwork: () => invoke<void>('create_panel_network'),
+  resetEndpoint: () => invoke<void>('reset_endpoint'),
   openAdmin: (id: string) => invoke<void>('open_admin', { id }),
   streamLogs: (id: string) => invoke<void>('stream_logs', { id }),
   stopLogs: (id: string) => invoke<void>('stop_logs', { id }),

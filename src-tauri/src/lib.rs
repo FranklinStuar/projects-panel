@@ -13,6 +13,7 @@ mod netcheck;
 mod nginx;
 mod php;
 mod ssl;
+mod system;
 mod wordpress;
 mod wpcli;
 
@@ -105,6 +106,28 @@ async fn list_wp_versions() -> CmdResult<Vec<WpVersion>> {
 #[tauri::command]
 fn panel_endpoint() -> CmdResult<config::Endpoint> {
     Ok(config::endpoint_or_default())
+}
+
+// -- Fase 4: estado del sistema / primera configuración ----------------------
+
+/// Estado de los prerequisitos del panel (Docker, red, dnsmasq, mkcert, etc.)
+/// para la pantalla de configuración.
+#[tauri::command]
+async fn system_status() -> CmdResult<system::SystemStatus> {
+    Ok(system::status().await)
+}
+
+/// Crea el bridge `panel-net` si falta (idempotente).
+#[tauri::command]
+async fn create_panel_network() -> CmdResult<()> {
+    let docker = DockerManager::connect().map_err(e)?;
+    docker.ensure_network().await.map_err(e)
+}
+
+/// Olvida el endpoint persistido para reasignar puerto en el próximo arranque.
+#[tauri::command]
+fn reset_endpoint() -> CmdResult<()> {
+    config::clear_endpoint().map_err(e)
 }
 
 /// Abre el admin en el navegador (auto-login si el proyecto lo tiene activado).
@@ -355,6 +378,9 @@ pub fn run() {
             create_site,
             list_wp_versions,
             panel_endpoint,
+            system_status,
+            create_panel_network,
+            reset_endpoint,
             open_admin,
             stream_logs,
             stop_logs,

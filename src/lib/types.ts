@@ -66,6 +66,19 @@ export function siteUrl(ep: Endpoint, domain: string, ssl: boolean): string {
   return ep.httpPort === 80 ? `http://${domain}` : `http://${domain}:${ep.httpPort}`;
 }
 
+/// Espejo de `system::SystemStatus`: estado de los prerequisitos del panel.
+export interface SystemStatus {
+  dockerOk: boolean;
+  networkOk: boolean;
+  dnsmasqOk: boolean;
+  mkcertOk: boolean;
+  cliWrapperOk: boolean;
+  plasmoidOk: boolean;
+  endpoint: Endpoint;
+  projectsRoot: string;
+  configDir: string;
+}
+
 export type SiteStatus = 'running' | 'stopped' | 'migrationPending';
 
 export interface SiteState {

@@ -89,6 +89,7 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `nginx.rs` | Render/escritura/borrado de vhosts en `~/.config/wordpress-panel/nginx/conf.d/`. |
 | `php.rs` | `ensure_php_image` (docker build por versión), `wp_cli_phar_path` (descarga el phar). |
 | `domain.rs` | dnsmasq wildcard `*.test`: snippet + detección de resolución (`resolves_to`). Regla parametrizada por IP (`wildcard_rule`); `install_wildcard` la instala vía `pkexec` y recarga NetworkManager (para endpoint con IP loopback alterna). |
+| `system.rs` | `status()`: estado de prerequisitos para la pantalla de configuración (Docker, red `panel-net`, dnsmasq, CA mkcert, wrappers WP-CLI, plasmoid) + endpoint y rutas. |
 | `netcheck.rs` | Lee `/proc/net/tcp{,6}` para clasificar puertos del host: `Free`/`Wildcard`/`Specific(IPs)`. Selectores `pick_loopback_ip`/`pick_alt_port` y `holder_name` (proceso que ocupa un puerto). Base de la selección de endpoint de `docker.rs`. |
 | `wordpress.rs` | `create_site` end-to-end, `download_core` (tarball), `fetch_versions` (API wp.org, cache 24h), DB/wp-config/install vía WP-CLI, mu-plugin mailpit. |
 | `wpcli.rs` | `run()` WP-CLI dentro del container del proyecto, como `www-data` (WP-CLI rechaza root). |
@@ -115,6 +116,9 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `create_site` | `req: NewSiteRequest` | `SiteConfig` | Crea/instala proyecto completo. |
 | `list_wp_versions` | — | `Vec<WpVersion>` | Versiones WP (cache 24h). |
 | `panel_endpoint` | — | `Endpoint` | Punto de publicación del panel (IP loopback + puertos); el frontend muestra el puerto si es alterno. |
+| `system_status` | — | `SystemStatus` | Estado de prerequisitos (Docker, red, dnsmasq, mkcert, wrappers, plasmoid) + endpoint y rutas. |
+| `create_panel_network` | — | `()` | Crea el bridge `panel-net` si falta. |
+| `reset_endpoint` | — | `()` | Olvida el endpoint persistido (reasigna puerto al próximo arranque). |
 | `open_admin` | `id` | `()` | Abre el admin en el navegador (auto-login si está activo). |
 | `stream_logs` | `id` | `()` | Inicia el stream de logs → eventos `log:{id}`. |
 | `stop_logs` | `id` | `()` | Detiene el stream de logs. |

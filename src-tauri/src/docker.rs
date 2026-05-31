@@ -69,6 +69,15 @@ impl DockerManager {
         Ok(())
     }
 
+    /// ¿Existe ya el bridge `panel-net`? (para el estado del sistema).
+    pub async fn network_exists(&self) -> bool {
+        self.docker
+            .list_networks::<String>(None)
+            .await
+            .map(|nets| nets.iter().any(|n| n.name.as_deref() == Some(NETWORK)))
+            .unwrap_or(false)
+    }
+
     // -- introspección ------------------------------------------------------
 
     pub async fn is_running(&self, name: &str) -> bool {
