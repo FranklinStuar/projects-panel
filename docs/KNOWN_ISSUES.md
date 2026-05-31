@@ -1,5 +1,15 @@
 # Problemas conocidos (a revisar al final de todas las fases)
 
+## Import LocalWP: la DB requiere el dump en disco
+
+El importador (`localwp.rs`) copia `app/public` y el dump `app/sql/local.sql` que
+LocalWP deja en disco. La DB **no** se extrae del MySQL de LocalWP en vivo: si ese
+`local.sql` no existe (o está desactualizado), el sitio se migra con la base de
+datos vacía. Mitigación: exportar la DB desde LocalWP antes de importar. La
+migración repunta `home`/`siteurl` al dominio `.test`, pero **no** hace
+`search-replace` del contenido (URLs `*.local` embebidas en posts siguen ahí);
+si hace falta, correr `wp search-replace` manualmente tras migrar.
+
 ## Botones de la barra de título no respetan la config de KDE
 
 **Síntoma:** en KDE/Wayland los botones (cerrar/min/max) no aparecen donde el

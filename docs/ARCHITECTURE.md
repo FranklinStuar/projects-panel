@@ -89,7 +89,8 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `nginx.rs` | Render/escritura/borrado de vhosts en `~/.config/wordpress-panel/nginx/conf.d/`. |
 | `php.rs` | `ensure_php_image` (docker build por versión), `wp_cli_phar_path` (descarga el phar). |
 | `domain.rs` | dnsmasq wildcard `*.test`: snippet + detección de resolución (`resolves_to`). Regla parametrizada por IP (`wildcard_rule`); `install_wildcard` la instala vía `pkexec` y recarga NetworkManager (para endpoint con IP loopback alterna). |
-| `migrate.rs` | `migrate_site()`: provisiona un proyecto `migrationPending` en el sistema actual (crea DB, regenera wp-config, importa el último dump de `app/sql/`, regenera SSL) y lo enciende. Devuelve config + aviso opcional. |
+| `migrate.rs` | `migrate_site()`: provisiona un proyecto `migrationPending` en el sistema actual (crea DB, regenera wp-config, importa el último dump de `app/sql/`, fija `home`/`siteurl`, regenera SSL) y lo enciende. Devuelve config + aviso opcional. |
+| `localwp.rs` | Importa sitios de LocalWP: `list_sites()` (parsea `~/.config/Local/sites.json`), `import_site()` (copia `app/public` + dump, crea `config.json` `migrationPending`). |
 | `system.rs` | `status()`: estado de prerequisitos para la pantalla de configuración (Docker, red `panel-net`, dnsmasq, CA mkcert, wrappers WP-CLI, plasmoid) + endpoint y rutas. |
 | `netcheck.rs` | Lee `/proc/net/tcp{,6}` para clasificar puertos del host: `Free`/`Wildcard`/`Specific(IPs)`. Selectores `pick_loopback_ip`/`pick_alt_port` y `holder_name` (proceso que ocupa un puerto). Base de la selección de endpoint de `docker.rs`. |
 | `wordpress.rs` | `create_site` end-to-end, `download_core` (tarball), `fetch_versions` (API wp.org, cache 24h), DB/wp-config/install vía WP-CLI, mu-plugin mailpit. |
@@ -121,6 +122,8 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `create_panel_network` | — | `()` | Crea el bridge `panel-net` si falta. |
 | `reset_endpoint` | — | `()` | Olvida el endpoint persistido (reasigna puerto al próximo arranque). |
 | `migrate_site` | `id` | `Migration` | Migra un proyecto pendiente (DB + dump + SSL) y lo enciende. |
+| `list_localwp_sites` | — | `Vec<LocalSite>` | Sitios de LocalWP candidatos a importar. |
+| `import_localwp_site` | `id` | `ImportResult` | Importa un sitio de LocalWP (queda `migrationPending`). |
 | `open_admin` | `id` | `()` | Abre el admin en el navegador (auto-login si está activo). |
 | `stream_logs` | `id` | `()` | Inicia el stream de logs → eventos `log:{id}`. |
 | `stop_logs` | `id` | `()` | Detiene el stream de logs. |
@@ -185,6 +188,7 @@ sigue funcionando sin widget.
 └── data/                          datos locales
 
 Sistema (fuera del repo): /etc/NetworkManager/dnsmasq.d/wordpress-panel.conf
+Origen import LocalWP (solo lectura): ~/.config/Local/sites.json + ~/Local Sites/{site}/
 ```
 
 ## Frontend

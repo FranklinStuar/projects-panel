@@ -46,6 +46,9 @@ pub async fn migrate_site(docker: &DockerManager, site: &SiteConfig) -> Result<M
     let note = match latest_dump(site) {
         Some(dump) => {
             import_dump(docker, site, &dump).await?;
+            // El dump pudo venir con otro dominio (p. ej. LocalWP `.local`):
+            // fijar home/siteurl al dominio del panel para que el admin funcione.
+            fix_site_url(docker, site).await.ok();
             None
         }
         None => Some(
@@ -87,6 +90,25 @@ fn latest_dump(site: &SiteConfig) -> Option<PathBuf> {
         }
     }
     newest.map(|(_, p)| p)
+}
+
+/// Fija `home`/`siteurl` al dominio del panel (el dump pudo traer otro dominio).
+async fn fix_site_url(docker: &DockerManager, site: &SiteConfig) -> Result<()> {
+    let url = crate::config::endpoint_or_default().site_url(&site.domain, site.services.nginx.ssl);
+    for opt in ["home", "siteurl"] {
+        crate::wpcli::run(
+            docker,
+            site,
+            &[
+                "option".to_string(),
+                "update".to_string(),
+                opt.to_string(),
+                url.clone(),
+            ],
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Importa un dump SQL vía WP-CLI. `app/sql/` no está montado en el container,

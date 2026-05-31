@@ -1,13 +1,18 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
-  import type { SystemStatus } from '$lib/types';
+  import type { SystemStatus, LocalSite } from '$lib/types';
 
   let status = $state<SystemStatus | null>(null);
   let loading = $state(true);
   let busy = $state(false);
   let msg = $state<string | null>(null);
   let err = $state<string | null>(null);
+
+  // Import LocalWP.
+  let localSites = $state<LocalSite[]>([]);
+  let localError = $state<string | null>(null);
+  let importing = $state<Record<string, boolean>>({});
 
   async function load() {
     try {
@@ -17,6 +22,29 @@
       err = String(e);
     } finally {
       loading = false;
+    }
+    // LocalWP es opcional: su ausencia no es un error de la página.
+    try {
+      localError = null;
+      localSites = await api.listLocalwpSites();
+    } catch (e) {
+      localError = String(e);
+      localSites = [];
+    }
+  }
+
+  async function importLocal(s: LocalSite) {
+    importing = { ...importing, [s.id]: true };
+    err = null;
+    msg = null;
+    try {
+      const r = await api.importLocalwpSite(s.id);
+      msg = `Importado "${r.site.name}" → ${r.site.domain}. ${r.note ?? ''} Usa "Migrar y encender" en Proyectos.`;
+      await load();
+    } catch (e) {
+      err = String(e);
+    } finally {
+      importing = { ...importing, [s.id]: false };
     }
   }
 
@@ -166,5 +194,38 @@
       </div>
     </div>
     <p class="mt-2 text-xs text-zinc-500">Tema: navy oscuro (sin selector claro/oscuro).</p>
+  </section>
+
+  <!-- Import LocalWP -->
+  <section class="mb-6">
+    <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Importar desde LocalWP</h2>
+    {#if localError}
+      <p class="rounded border border-zinc-800 px-4 py-3 text-sm text-zinc-500">{localError}</p>
+    {:else if localSites.length === 0}
+      <p class="rounded border border-zinc-800 px-4 py-3 text-sm text-zinc-500">No hay sitios de LocalWP.</p>
+    {:else}
+      <p class="mb-2 text-xs text-zinc-500">
+        Copia los archivos y el dump; el sitio queda como "pendiente de migración".
+        Enciéndelo con "Migrar y encender" en Proyectos (crea la DB e importa el dump).
+      </p>
+      <div class="overflow-hidden rounded border border-zinc-800 text-sm">
+        {#each localSites as s (s.id)}
+          <div class="flex items-center justify-between border-b border-zinc-800/60 px-4 py-3 last:border-0">
+            <div>
+              <div class="font-medium">{s.name} <span class="text-xs text-zinc-500">→ {s.domain}</span></div>
+              <div class="text-xs text-zinc-500">
+                PHP {s.phpVersion} · MySQL {s.dbVersion}{s.multisite ? ' · multisite' : ''}{s.xdebug ? ' · xdebug' : ''}
+              </div>
+            </div>
+            {#if s.alreadyImported}
+              <span class="text-xs text-zinc-500">Ya importado</span>
+            {:else}
+              <button class="rounded bg-zinc-800 px-3 py-1.5 disabled:opacity-50" disabled={importing[s.id]}
+                onclick={() => importLocal(s)}>{importing[s.id] ? '…' : 'Importar'}</button>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
   </section>
 {/if}

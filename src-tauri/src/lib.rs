@@ -8,6 +8,7 @@ mod dbus;
 mod docker;
 mod domain;
 mod github;
+mod localwp;
 mod logs;
 mod migrate;
 mod netcheck;
@@ -138,6 +139,18 @@ async fn migrate_site(id: String) -> CmdResult<migrate::Migration> {
     let site = load_site(&id)?;
     let docker = DockerManager::connect().map_err(e)?;
     migrate::migrate_site(&docker, &site).await.map_err(e)
+}
+
+/// Lista los sitios de LocalWP candidatos a importar.
+#[tauri::command]
+fn list_localwp_sites() -> CmdResult<Vec<localwp::LocalSite>> {
+    localwp::list_sites().map_err(e)
+}
+
+/// Importa un sitio de LocalWP como proyecto del panel (queda `migrationPending`).
+#[tauri::command]
+fn import_localwp_site(id: String) -> CmdResult<localwp::ImportResult> {
+    localwp::import_site(&id).map_err(e)
 }
 
 /// Abre el admin en el navegador (auto-login si el proyecto lo tiene activado).
@@ -392,6 +405,8 @@ pub fn run() {
             create_panel_network,
             reset_endpoint,
             migrate_site,
+            list_localwp_sites,
+            import_localwp_site,
             open_admin,
             stream_logs,
             stop_logs,

@@ -85,6 +85,25 @@ export interface Migration {
   note: string | null;
 }
 
+/// Espejo de `localwp::LocalSite`: un sitio de LocalWP candidato a importar.
+export interface LocalSite {
+  id: string;
+  name: string;
+  domain: string;
+  path: string;
+  phpVersion: string;
+  dbVersion: string;
+  multisite: boolean;
+  xdebug: boolean;
+  alreadyImported: boolean;
+}
+
+/// Espejo de `localwp::ImportResult`.
+export interface ImportResult {
+  site: SiteConfig;
+  note: string | null;
+}
+
 export type SiteStatus = 'running' | 'stopped' | 'migrationPending';
 
 export interface SiteState {

@@ -181,7 +181,7 @@ pub async fn create_site(docker: &DockerManager, req: NewSiteRequest) -> Result<
     Ok(site)
 }
 
-fn create_dirs(site: &SiteConfig) -> Result<()> {
+pub(crate) fn create_dirs(site: &SiteConfig) -> Result<()> {
     let base = Path::new(&site.path);
     for sub in [
         "app/public",
@@ -197,7 +197,7 @@ fn create_dirs(site: &SiteConfig) -> Result<()> {
     Ok(())
 }
 
-fn write_php_ini(site: &SiteConfig) -> Result<()> {
+pub(crate) fn write_php_ini(site: &SiteConfig) -> Result<()> {
     let tmpl = crate::docker::docker_assets_dir().join("php.ini.tmpl");
     let content = std::fs::read_to_string(&tmpl)
         .unwrap_or_else(|_| DEFAULT_PHP_INI.to_string());
@@ -389,7 +389,7 @@ add_action( 'phpmailer_init', function ( $mailer ) {
 } );
 "#;
 
-fn slugify(name: &str) -> String {
+pub(crate) fn slugify(name: &str) -> String {
     name.trim()
         .to_lowercase()
         .chars()

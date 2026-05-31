@@ -198,6 +198,22 @@ estado, pero no había forma de migrar ni de exportar la DB al apagar.
   `backup::rotate_dumps(site, 3)` deja solo los 3 `db-*.sql` más recientes (no
   toca otros `.sql` como `imported.sql`).
 
+### Importación desde LocalWP
+
+- **`localwp.rs`** (nuevo): `list_sites()` parsea `~/.config/Local/sites.json`
+  (deserialización tolerante) y lista los sitios (nombre, dominio `.test`, PHP,
+  MySQL, multisite, xdebug, ya-importado). `import_site()` crea el proyecto del
+  panel: copia `app/public` con `cp -a`, copia el dump `app/sql/local.sql` como
+  `imported.sql`, mapea versiones a las soportadas (avisa si ajusta) y escribe un
+  `config.json` con `migrationPending=true` y grupo "LocalWP". La DB se
+  materializa luego con "Migrar y encender". Reusa `slugify`/`create_dirs`/
+  `write_php_ini` de `wordpress.rs` (ahora `pub(crate)`).
+- **Comandos**: `list_localwp_sites`, `import_localwp_site`. Sección "Importar
+  desde LocalWP" en `/settings`.
+- **`migrate.rs`**: tras importar el dump, fija `home`/`siteurl` al dominio del
+  panel (`fix_site_url`) para que el admin funcione aunque el dump venga de
+  `*.local`. Limitación (sin `search-replace`) documentada en `KNOWN_ISSUES.md`.
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).
