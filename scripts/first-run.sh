@@ -45,4 +45,19 @@ else
     echo "      Instálalo con:  sudo pacman -S nss mkcert"
 fi
 
+# 4. Plasmoid KDE -------------------------------------------------------------
+PLASMOID_DIR="$(dirname "$0")/../plasma/applets/wordpress-panel-plasmoid"
+if command -v kpackagetool6 >/dev/null 2>&1 && [ -d "$PLASMOID_DIR" ]; then
+    if kpackagetool6 --type Plasma/Applet --install "$PLASMOID_DIR" >/dev/null 2>&1; then
+        echo "  [+] plasmoid KDE instalado"
+    else
+        kpackagetool6 --type Plasma/Applet --upgrade "$PLASMOID_DIR" >/dev/null 2>&1 \
+            && echo "  [ok] plasmoid KDE actualizado" \
+            || echo "  [i] plasmoid ya instalado o sin cambios"
+    fi
+    echo "      Añádelo al panel: clic derecho en el panel → Añadir widgets → 'Panel WP'"
+else
+    echo "  [i] kpackagetool6 no disponible; omitiendo plasmoid (no es KDE?)"
+fi
+
 echo "==> Listo. Lanza el panel con:  pnpm tauri dev"

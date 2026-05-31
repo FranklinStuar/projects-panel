@@ -95,6 +95,7 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `autologin.rs` | `open_admin`: token efímero (transient WP, 60s, un solo uso) + abre navegador; el mu-plugin `panel-autologin.php` valida y loguea al admin. |
 | `github.rs` | `gh`/`git` en el HOST (no container, los archivos están bind-montados): `status`, `clone`, `pull`, `remove_dir`, `propose_path`. Sin auth propia. |
 | `ssl.rs` | `generate`: cert/key por dominio con mkcert en `ssl/` del proyecto. La CA local (`mkcert -install`) se hace una vez en `first-run.sh`. |
+| `dbus.rs` | Servidor D-Bus (zbus) para el plasmoid KDE; arranca en el `setup` de Tauri. Ver sección D-Bus. |
 
 ## Catálogo de comandos IPC
 
@@ -126,6 +127,26 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 **Eventos** (backend → frontend, vía `app.emit`): `log:{id}` — una línea de log por
 evento. El frontend se suscribe con `listen()` de `@tauri-apps/api/event`. Estado
 de los streams activos en `LogStreams` (managed state, `Mutex<HashMap>`).
+
+## D-Bus (plasmoid KDE)
+
+`dbus.rs` publica en la sesión del usuario el servicio
+`com.goldmediatech.WordpressPanel`, objeto `/com/goldmediatech/WordpressPanel`,
+interfaz `…Manager`:
+
+| Método | Retorno | Hace |
+|---|---|---|
+| `GetRunningSites` | `String` (JSON `[{id,name,domain}]`) | Proyectos activos. |
+| `StopSite(id)` | `bool` | Detiene un proyecto. |
+| `StopAll` | `bool` | Detiene todos. |
+| `Quit` | — | Cierra el panel (`app.exit(0)`). |
+
+El plasmoid (`plasma/applets/wordpress-panel-plasmoid/`, Plasma 6) consulta cada
+3s vía `qdbus6` (DataSource `executable`) y pinta los proyectos activos con botón
+de detener + "Apagar todo y cerrar". No hay "encender todos" (requisito del
+usuario). Instalación: `kpackagetool6 --install` (lo hace `first-run.sh`).
+El servidor arranca en el `setup` de Tauri; si no hay sesión D-Bus, el panel
+sigue funcionando sin widget.
 
 ## Rutas en disco
 

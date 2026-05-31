@@ -38,7 +38,7 @@ Cimientos de la optimización de recursos.
 - WP-CLI wrapper instalado en `~/.local/bin/` + binario `wordpress-panel-cli`.
 - Verificación end-to-end de una provisión completa de WordPress real.
 
-## Fase 2 — Funcionalidades completas (en curso)
+## Fase 2 — Funcionalidades completas (COMPLETA)
 
 ### Hecho
 - **Logs en vivo** (`logs.rs`): stream `follow` de los logs del container →
@@ -57,10 +57,15 @@ Cimientos de la optimización de recursos.
   navegadores) vía `first-run.sh`. Botón "Regenerar SSL" en Info.
 - **Grupos de proyectos**: `set_site_group` + editor de grupo en Info; el
   dashboard ya agrupa por `config.group`.
+- **D-Bus + plasmoid KDE** (`dbus.rs` + `plasma/applets/wordpress-panel-plasmoid/`):
+  servicio `com.goldmediatech.WordpressPanel` (GetRunningSites/StopSite/StopAll/
+  Quit), arranca en el setup de Tauri; plasmoid Plasma 6 que consulta vía qdbus6
+  y muestra proyectos activos con detener + "Apagar todo y cerrar". Verificado en
+  vivo con busctl/qdbus6; plasmoid instalado con kpackagetool6.
 - **Vista de proyecto con tabs** (Info / Logs / Plugins-Themes / GitHub) + start/stop.
 
-### Pendiente de Fase 2
-- D-Bus (`dbus.rs`) + plasmoid KDE (único item grande restante).
+Fase 2 completa. Pendiente de verificación: comportamiento visual del plasmoid en
+una sesión Plasma (no testeable headless) y la barra de título (KNOWN_ISSUES).
 
 ## Fase 3+ — Pendiente
 

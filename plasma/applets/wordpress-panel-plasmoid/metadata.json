@@ -1,0 +1,16 @@
+{
+  "KPackageStructure": "Plasma/Applet",
+  "KPlugin": {
+    "Id": "com.goldmediatech.wordpresspanel",
+    "Name": "Panel WP",
+    "Name[es]": "Panel WP",
+    "Description": "Proyectos WordPress activos del panel",
+    "Description[es]": "Proyectos WordPress activos del panel",
+    "Icon": "applications-development",
+    "Version": "0.1",
+    "License": "MIT",
+    "Authors": [{ "Name": "Franklin" }],
+    "Category": "System Information"
+  },
+  "X-Plasma-API-Minimum-Version": "6.0"
+}

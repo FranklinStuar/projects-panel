@@ -2,6 +2,7 @@
 
 mod autologin;
 mod config;
+mod dbus;
 mod docker;
 mod domain;
 mod github;
@@ -252,6 +253,21 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .manage(LogStreams::default())
+        .setup(|app| {
+            // Servidor D-Bus para el plasmoid KDE. Si la sesión D-Bus no está
+            // disponible, el panel sigue funcionando igual (solo sin widget).
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                match dbus::serve(handle).await {
+                    Ok(conn) => {
+                        let _keep = conn; // mantener viva la conexión
+                        std::future::pending::<()>().await;
+                    }
+                    Err(err) => eprintln!("D-Bus no disponible: {err}"),
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             get_sites,
             start_site,
