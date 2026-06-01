@@ -283,6 +283,26 @@ siempre. Dumps chicos (~1&nbsp;MB) colaban de chiripa; uno de 7&nbsp;MB colgaba.
   mismo tick → se perdían las primeras líneas de progreso (la consola salía
   vacía). Ahora limpia el buffer al abrir y no pierde líneas.
 
+### Fix — consola de progreso vacía: faltaba la capability de eventos
+
+La migración funcionaba pero la consola (`OpConsole`) salía **vacía**: solo se veía
+el ícono verde al terminar, sin ninguna línea de progreso ni el error si fallaba.
+Causa: el proyecto **no tenía ninguna capability de Tauri 2**. Los comandos propios
+(`#[tauri::command]`) no pasan por el ACL y por eso `migrate_site` funcionaba, pero
+`listen('op-log')` usa el plugin **`core:event`**, que sí está gateado por permisos;
+sin capability que lo conceda, el `listen` quedaba bloqueado y nunca llegaban los
+eventos. Los tests e2e usan IPC mockeado (no Tauri real), así que no lo detectaban.
+
+- **`src-tauri/capabilities/default.json`** (nuevo): concede `core:default` +
+  `core:event:default` a la ventana `main`. Tauri 2 autodescubre `capabilities/*.json`,
+  no hace falta tocar `tauri.conf.json`.
+- **`migrate.rs`**: mensajes de progreso más descriptivos y numerados (`[n/6]`):
+  arrancar DB + esquema, SSL, encender, regenerar wp-config, importar dump (con
+  nombre y tamaño), ajustar URLs (con el destino `scheme://dominio`). El flujo real
+  va en `run_migration`; `migrate_site` lo envuelve y, ante **cualquier** error,
+  emite una línea `✗ La migración falló: …` a la consola antes de propagarlo, para
+  que el fallo se vea ahí y no solo en el banner.
+
 **Fase 4 completa.** Falta solo Fase 5 (asistente IA, `agent.rs`).
 
 ## Testing — dos vías (ver `docs/TESTING.md`)

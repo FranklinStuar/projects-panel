@@ -30,53 +30,109 @@ pub async fn migrate_site<R: Runtime>(
     docker: &DockerManager,
     site: &SiteConfig,
 ) -> Result<Migration> {
-    log(app, format!("▶ Migrando «{}»…", site.name));
+    // Envuelve el flujo real para que CUALQUIER error se vea en la consola de
+    // progreso (`op-log`) con un ✗, además de propagarse a la UI. Sin esto el
+    // usuario veía la consola abierta y vacía sin saber qué pasó.
+    match run_migration(app, docker, site).await {
+        Ok(mig) => Ok(mig),
+        Err(err) => {
+            log(app, format!("✗ La migración falló: {err:#}"));
+            Err(err)
+        }
+    }
+}
+
+async fn run_migration<R: Runtime>(
+    app: &AppHandle<R>,
+    docker: &DockerManager,
+    site: &SiteConfig,
+) -> Result<Migration> {
+    let scheme = if site.services.nginx.ssl { "https" } else { "http" };
+    log(app, format!("▶ Migrando «{}» a este sistema.", site.name));
+    log(app, format!("  Destino: {scheme}://{}", site.domain));
     if !site.public_dir().exists() {
         return Err(anyhow!(
             "falta {:?}: la carpeta del proyecto está incompleta",
             site.public_dir()
         ));
     }
+    log(app, "  Carpeta del proyecto verificada.");
 
     // 1. DB compartida on-demand + base de datos vacía del proyecto (idempotente).
-    log(app, "• Arrancando base de datos y creando el esquema…");
+    log(
+        app,
+        format!(
+            "[1/6] Base de datos: arrancando MySQL {} compartido…",
+            site.services.db.version
+        ),
+    );
     let db_container = docker.ensure_db(&site.services.db).await?;
+    log(
+        app,
+        format!(
+            "      Creando el esquema «{}» (si no existe)…",
+            site.services.db.db_name
+        ),
+    );
     crate::wordpress::create_database(docker, &db_container, site).await?;
+    log(app, "      ✓ Base de datos lista.");
 
     // 2. SSL: generar el certificado ANTES de encender, porque el vhost de
     //    panel-nginx lo referencia y `nginx -s reload` falla si no existe (la CA
     //    de mkcert es local; se regenera en cada sistema).
     if site.services.nginx.ssl {
-        log(app, "• Generando certificado SSL (mkcert)…");
+        log(
+            app,
+            format!("[2/6] SSL: generando certificado mkcert para {}…", site.domain),
+        );
         crate::ssl::generate(site).await?;
+        log(app, "      ✓ Certificado listo.");
+    } else {
+        log(app, "[2/6] SSL: desactivado para este proyecto, se omite.");
     }
 
     // 3. Encender container php + vhost en panel-nginx + reload.
     log(
         app,
-        "• Encendiendo el proyecto (la primera vez puede construir la imagen PHP, tarda)…",
+        "[3/6] Encendiendo el proyecto (la 1ª vez construye la imagen PHP, puede tardar)…",
     );
     docker.start_site(site).await?;
+    log(app, "      ✓ Container del proyecto y nginx arriba.");
 
     // 4. Regenerar wp-config con las credenciales del panel: el origen pudo usar
     //    otro host/disco (otra instalación del panel, o LocalWP).
-    log(app, "• Regenerando wp-config.php…");
+    log(app, "[4/6] Regenerando wp-config.php con las credenciales del panel…");
     crate::wordpress::wp_config_create(docker, site, &db_container).await?;
+    log(app, "      ✓ wp-config.php regenerado.");
 
     // 5. Importar el último dump si existe; si no, el sitio arranca vacío.
     let note = match latest_dump(site) {
         Some(dump) => {
             let mb = std::fs::metadata(&dump).map(|m| m.len() / 1_048_576).unwrap_or(0);
-            log(app, format!("• Importando base de datos ({mb} MB), espera…"));
+            let name = dump.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            log(
+                app,
+                format!("[5/6] Importando la base de datos ({name}, {mb} MB), espera…"),
+            );
             import_dump(docker, site, &db_container, &dump).await?;
+            log(app, "      ✓ Dump importado.");
             // El dump pudo venir con otro dominio (p. ej. LocalWP `.local`):
             // fijar home/siteurl al dominio del panel para que el admin funcione.
-            log(app, "• Ajustando URLs del sitio…");
-            fix_site_url(docker, site).await.ok();
+            log(
+                app,
+                format!("[6/6] Ajustando URLs del sitio a {scheme}://{}…", site.domain),
+            );
+            match fix_site_url(docker, site).await {
+                Ok(()) => log(app, "      ✓ URLs (home/siteurl) actualizadas."),
+                Err(e) => log(
+                    app,
+                    format!("      ⚠ No se pudieron ajustar las URLs ({e:#}); revísalas en el admin."),
+                ),
+            }
             None
         }
         None => {
-            log(app, "• No hay dump: el sitio arranca con la DB vacía.");
+            log(app, "[5/6] No hay dump en app/sql/: el sitio arranca con la DB vacía.");
             Some("No había dump en app/sql/: el sitio arranca con la base de datos vacía.".to_string())
         }
     };
@@ -87,7 +143,7 @@ pub async fn migrate_site<R: Runtime>(
     updated.last_migrated_at = Some(Utc::now().to_rfc3339());
     write_site_config(&updated)?;
 
-    log(app, format!("✓ «{}» migrado y encendido.", site.name));
+    log(app, format!("✓ «{}» migrado y encendido — {scheme}://{}", site.name, site.domain));
     Ok(Migration {
         site: updated,
         note,

@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permisos base de la ventana principal. Incluye `core:event` para que el frontend pueda escuchar `op-log` (consola de progreso de migración/import); sin esto `listen()` queda bloqueado por el ACL de Tauri 2 y la consola sale vacía. Los comandos propios (`#[tauri::command]`) no pasan por el ACL, por eso funcionan sin permiso.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default"
+  ]
+}
