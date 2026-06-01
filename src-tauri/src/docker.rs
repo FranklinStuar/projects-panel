@@ -333,8 +333,8 @@ impl DockerManager {
     /// UI web en `127.0.0.1:8088`; habla con los containers DB por `panel-net`.
     /// On-demand: solo cuando un proyecto pide ver su base de datos.
     ///
-    /// Monta `docker/adminer/single-db.php` como plugin (auto-login + restringe
-    /// la vista a la DB del proyecto, ver el propio archivo).
+    /// Monta `docker/adminer/autologin.php` como plugin (auto-login con las
+    /// credenciales del entorno, ver el propio archivo).
     pub async fn ensure_adminer(&self) -> Result<()> {
         if self.is_running(ADMINER).await {
             return Ok(());
@@ -348,7 +348,7 @@ impl DockerManager {
         let image = "adminer:4";
         self.ensure_image(image).await?;
 
-        let plugin = docker_assets_dir().join("adminer").join("single-db.php");
+        let plugin = docker_assets_dir().join("adminer").join("autologin.php");
 
         let ports = host_port_map(&[(ADMINER_UI_PORT, "8080/tcp")]);
         let mut exposed = HashMap::new();
@@ -358,7 +358,7 @@ impl DockerManager {
             network_mode: Some(NETWORK.to_string()),
             port_bindings: Some(ports),
             binds: Some(vec![format!(
-                "{}:/var/www/html/plugins-enabled/single-db.php:ro",
+                "{}:/var/www/html/plugins-enabled/autologin.php:ro",
                 plugin.display()
             )]),
             ..Default::default()

@@ -311,8 +311,8 @@ async fn open_minio(app: AppHandle) -> CmdResult<()> {
 }
 
 /// Abre Adminer en el navegador apuntando a la base de datos del proyecto.
-/// Pre-rellena servidor/usuario/db por la URL; el plugin `single-db.php` hace
-/// el auto-login y restringe la vista a esa única base de datos.
+/// Pasa servidor/usuario/db por la URL; el plugin `autologin.php` hace el
+/// auto-login en cero clics con las credenciales del entorno.
 #[tauri::command]
 async fn open_adminer(app: AppHandle, id: String) -> CmdResult<()> {
     use tauri_plugin_opener::OpenerExt;

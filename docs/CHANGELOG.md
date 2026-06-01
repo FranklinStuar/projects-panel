@@ -325,12 +325,14 @@ eventos. Los tests e2e usan IPC mockeado (no Tauri real), así que no lo detecta
   DB para MySQL, MariaDB y Postgres (un solo tool para los tres motores). UI en
   `127.0.0.1:8088`, habla con los containers DB por `panel-net`. Se apaga con el
   resto de compartidos cuando no queda proyecto activo (`teardown_unused_shared`).
-- **Plugin `docker/adminer/single-db.php`** (montado en `plugins-enabled/`): hace
-  auto-login (pass fija `panel` del entorno, acepta submit con password vacío) y
-  **restringe la vista a la DB del proyecto** — `databases()` solo devuelve el
-  `db` de la URL, así el resto de DBs del container compartido quedan ocultas. No
-  es seguridad (root mantiene grants), es acotar la vista. Verificado: login con
-  password vacío entra y una segunda DB del mismo container no aparece.
+- **Plugin `docker/adminer/autologin.php`** (montado en `plugins-enabled/`):
+  auto-login en **cero clics**. En peticiones GET inyecta `$_POST["auth"]` con la
+  pass fija del entorno (`panel`); como los plugins se construyen antes del bloque
+  de auth de Adminer y este reemplaza el token del POST de `auth` por el de sesión
+  válido, `verify_token()` pasa y se entra sin formulario. Solo en GET (no pisa
+  los POST reales del usuario, p. ej. ejecutar SQL). Sin restricción de vista
+  (dev): un servidor/DB mal escrito falla de forma natural. Verificado: un solo
+  GET sin POST aterriza en `Database: foo_db` con sesión iniciada.
 - **Comando `open_adminer(id)`** (`lib.rs`): exige el proyecto corriendo (DB
   arriba), arranca Adminer y abre el navegador en
   `?{driver}={db_container}&username={root|panel}&db={dbName}` (driver `pgsql`
