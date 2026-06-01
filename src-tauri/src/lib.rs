@@ -310,6 +310,39 @@ async fn open_minio(app: AppHandle) -> CmdResult<()> {
     app.opener().open_url(url, None::<&str>).map_err(e)
 }
 
+/// Abre Adminer en el navegador apuntando a la base de datos del proyecto.
+/// Pre-rellena servidor/usuario/db por la URL; el plugin `single-db.php` hace
+/// el auto-login y restringe la vista a esa única base de datos.
+#[tauri::command]
+async fn open_adminer(app: AppHandle, id: String) -> CmdResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let site = load_site(&id)?;
+    let docker = DockerManager::connect().map_err(e)?;
+
+    // La DB del proyecto debe estar corriendo (arranca al iniciar el proyecto).
+    let db_container = docker::db_container_name(&site.services.db);
+    if !docker.is_running(&db_container).await {
+        return Err("La base de datos no está corriendo (inicia el proyecto primero)".into());
+    }
+    docker.ensure_adminer().await.map_err(e)?;
+
+    let db = &site.services.db;
+    // Clave del parámetro = driver: `pgsql` para Postgres, `server` para MySQL/MariaDB.
+    let (driver_param, user) = match db.db_type {
+        config::DbType::Postgres => ("pgsql", "panel"),
+        config::DbType::Mysql | config::DbType::Mariadb => ("server", "root"),
+    };
+    let url = format!(
+        "http://127.0.0.1:{port}/?{driver}={server}&username={user}&db={dbname}",
+        port = docker::ADMINER_UI_PORT,
+        driver = driver_param,
+        server = db_container,
+        user = user,
+        dbname = db.db_name,
+    );
+    app.opener().open_url(url, None::<&str>).map_err(e)
+}
+
 /// Stubs de Fase posterior: devuelven un mensaje informativo (UI preparada).
 #[tauri::command]
 async fn feature_stub(feature: String) -> CmdResult<String> {
@@ -450,6 +483,7 @@ pub fn run() {
             install_cli_wrapper,
             open_mailpit,
             open_minio,
+            open_adminer,
             feature_stub
         ])
         .run(tauri::generate_context!())

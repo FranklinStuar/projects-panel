@@ -92,8 +92,11 @@ scripts/                 first-run.sh, wp-wrapper.sh, wordpress-panel-cli.sh
 Fases 1–4 completas. Fase 4 incluyó: pantalla de configuración con estado del
 sistema (`system.rs`), migración entre sistemas + export-al-detener
 (`migrate.rs`, `backup::rotate_dumps`), import desde LocalWP (`localwp.rs`) y
-empaquetado del plasmoid (`scripts/package-plasmoid.sh`). Pendiente: Fase 5 (IA,
-`agent.rs`). Ver `docs/CHANGELOG.md` para el detalle. Diferido dentro de Fase 3:
+empaquetado del plasmoid (`scripts/package-plasmoid.sh`). Visor de DB compartido
+`panel-adminer` (Adminer 4 para MySQL/MariaDB/Postgres) con auto-login y vista
+acotada a la DB del proyecto vía `docker/adminer/single-db.php` (comando
+`open_adminer`). Pendiente: Fase 5 (IA, `agent.rs`). Ver `docs/CHANGELOG.md` para
+el detalle. Diferido dentro de Fase 3:
 container de frontend headless y plugin S3 (WP↔MinIO). Limitaciones/temas
 diferidos en `docs/KNOWN_ISSUES.md`: botones de la barra de título, verificación
 visual del plasmoid en Plasma, e import LocalWP (la DB requiere dump en disco).

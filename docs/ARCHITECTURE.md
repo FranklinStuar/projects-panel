@@ -48,6 +48,7 @@ Materializa el principio rector (ver `CLAUDE.md`).
 | `panel-postgres-{ver}` | `postgres:{ver}-alpine` | idem. |
 | `panel-mailpit` | `axllent/mailpit` | Captura de correo de todos los activos. UI host `127.0.0.1:8025`, SMTP `:1025` interno. Arranca con cualquier proyecto activo. |
 | `panel-minio` | `minio/minio` | S3 local on-demand (solo si el proyecto tiene flag `minio`). API host `127.0.0.1:9100`, consola `127.0.0.1:9101`, datos en `~/.config/wordpress-panel/minio-data`, creds `panel`/`panel-secret`. |
+| `panel-adminer` | `adminer:4` | Visor de DB on-demand (al pulsar «Ver base de datos»). UI host `127.0.0.1:8088`. Sirve MySQL/MariaDB/Postgres por `panel-net`. Monta `docker/adminer/single-db.php` como plugin: auto-login (pass fija `panel`) y acota la vista a la DB del proyecto (`?server=…&db=…` en la URL). Se apaga cuando no queda proyecto activo. |
 
 Nombre de DB compartida = `{prefix}-{version sin puntos}` (`DbType::service_prefix()`).
 
@@ -148,6 +149,7 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `install_cli_wrapper` | — | `String` | Instala `wp`/`wordpress-panel-cli` en `~/.local/bin`. |
 | `open_mailpit` | — | `()` | Abre la UI de Mailpit. |
 | `open_minio` | — | `()` | Abre la consola de MinIO. |
+| `open_adminer` | `id` | `()` | Arranca `panel-adminer` y abre el navegador en la DB del proyecto (requiere proyecto corriendo). |
 | `feature_stub` | `feature` | `String` (Err) | Stub Cloudflare/deploy/package (fase posterior). |
 
 **Eventos** (backend → frontend, vía `app.emit`): `log:{id}` — una línea de log de

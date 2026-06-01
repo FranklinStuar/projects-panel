@@ -54,5 +54,6 @@ export const api = {
   installCliWrapper: () => invoke<string>('install_cli_wrapper'),
   openMailpit: () => invoke<void>('open_mailpit'),
   openMinio: () => invoke<void>('open_minio'),
+  openAdminer: (id: string) => invoke<void>('open_adminer', { id }),
   featureStub: (feature: string) => invoke<string>('feature_stub', { feature })
 };

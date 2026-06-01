@@ -319,6 +319,24 @@ eventos. Los tests e2e usan IPC mockeado (no Tauri real), así que no lo detecta
   (dashboard, migrar, cancelar import, settings, nuevo, a11y) vía `pnpm test:e2e`.
   No necesita backend ni Docker.
 
+## Visor de bases de datos (Adminer)
+
+- **`panel-adminer`** (`adminer:4`), servicio compartido on-demand: visor web de
+  DB para MySQL, MariaDB y Postgres (un solo tool para los tres motores). UI en
+  `127.0.0.1:8088`, habla con los containers DB por `panel-net`. Se apaga con el
+  resto de compartidos cuando no queda proyecto activo (`teardown_unused_shared`).
+- **Plugin `docker/adminer/single-db.php`** (montado en `plugins-enabled/`): hace
+  auto-login (pass fija `panel` del entorno, acepta submit con password vacío) y
+  **restringe la vista a la DB del proyecto** — `databases()` solo devuelve el
+  `db` de la URL, así el resto de DBs del container compartido quedan ocultas. No
+  es seguridad (root mantiene grants), es acotar la vista. Verificado: login con
+  password vacío entra y una segunda DB del mismo container no aparece.
+- **Comando `open_adminer(id)`** (`lib.rs`): exige el proyecto corriendo (DB
+  arriba), arranca Adminer y abre el navegador en
+  `?{driver}={db_container}&username={root|panel}&db={dbName}` (driver `pgsql`
+  para Postgres, `server` para MySQL/MariaDB). Botón «Ver base de datos (Adminer)»
+  en la sección Base de datos de la página de proyecto.
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).
