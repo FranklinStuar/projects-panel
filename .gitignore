@@ -16,5 +16,12 @@ src-tauri/gen/
 # Artefactos de empaquetado
 /dist
 
+# Playwright (e2e GUI)
+/test-results
+/playwright-report
+/blob-report
+/.playwright-mcp
+/playwright/.cache
+
 # OS
 .DS_Store

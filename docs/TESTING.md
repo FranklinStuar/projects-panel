@@ -83,4 +83,129 @@ cargo test --lib integration_tests::import_localwp_hermetico -- --ignored --exac
 
 ## B. Tests CON panel (GUI)
 
-*(Pendiente: se documenta junto con la infraestructura de mock IPC + Playwright.)*
+El SPA llama a `invoke()` en cada acción, así que sin backend no arranca. Para
+probar **botones, ventanas y accesibilidad** sin Tauri ni Docker, se sirve el
+frontend con una capa de IPC simulada (`mockIPC`) que responde con fixtures.
+
+### B.1 Arrancar el panel en modo mock
+
+```bash
+pnpm dev:mock      # = VITE_MOCK_IPC=1 vite dev   → http://localhost:1420
+```
+
+Ábrelo en el navegador. La consola del navegador imprime `[mock-ipc] activo`.
+Verás 3 proyectos de muestra (corriendo / parado / pendiente de migración), el
+endpoint en puerto alterno, el estado del sistema y 2 sitios de LocalWP. Nada es
+real: las acciones mutan un estado en memoria que se reinicia al recargar.
+
+Piezas:
+- `src/lib/dev/fixtures.ts` — datos de muestra (sitios, endpoint, system status,
+  LocalWP, versiones WP).
+- `src/lib/dev/mock-ipc.ts` — `mockIPC` que responde cada comando de `api.ts`;
+  los flujos largos (migrar/importar/borrar) emiten líneas `op-log` con retardo,
+  así la consola `OpConsole` se ve poblándose en vivo.
+- `src/routes/+layout.ts` — carga el mock solo si `VITE_MOCK_IPC=1` (en
+  `pnpm tauri dev` real no se incluye).
+
+### B.2 Tests automatizados (Playwright)
+
+```bash
+pnpm test:e2e                       # headless; arranca el SPA mock solo
+pnpm exec playwright test --ui      # modo interactivo
+pnpm exec playwright show-report    # último informe HTML
+```
+
+`playwright.config.ts` levanta `pnpm dev:mock` automáticamente (`webServer`).
+**Cuidado:** `reuseExistingServer` está activo; si ya tienes un `vite dev`
+NORMAL (sin mock) en el 1420, Playwright lo reutiliza y los tests fallan sin
+datos. Cierra cualquier `vite dev` previo antes de correr los e2e.
+
+Specs en `e2e/` (un escenario por archivo): `dashboard`, `migrate`,
+`cancel-import`, `settings`, `new-site`, `a11y`.
+
+Notas para escribir specs:
+- Los `confirm()` se aprueban con `page.on('dialog', (d) => d.accept())`.
+- Usa `{ exact: true }` en nombres de rol que sean subcadena de otros
+  (`Encender` casa con `Migrar y encender`; `Proyectos` con el enlace
+  `← Proyectos`).
+
+### B.3 Inspección manual / asistida
+
+El mismo SPA mock se puede recorrer a mano en el navegador, o conducir con las
+herramientas MCP de Playwright (navegar, snapshot del árbol de accesibilidad,
+screenshots) para revisar botones y ventanas.
+
+---
+
+## C. Escenarios replicables (historial de clics)
+
+Estado inicial del modo mock (`pnpm dev:mock`):
+
+| Proyecto | Grupo | Estado |
+|--|--|--|
+| Tienda Demo | Cliente A | corriendo |
+| Blog Personal | Cliente A | parado |
+| Sitio Importado | LocalWP | pendiente de migración |
+
+LocalWP: «Proyecto Viejo» (importable) y «Sitio Importado» (ya importado).
+
+### C.1 Crear un proyecto
+
+| Paso | Acción | Dato |
+|--|--|--|
+| 1 | Click «Nuevo proyecto» (o ir a `/site/new`) | — |
+| 2 | Nombre del proyecto | `Mi Nuevo Sitio` |
+| 3 | Verificar dominio autocompletado | `mi-nuevo-sitio.test` |
+| 4 | Versión WP | (ya viene la `latest`) |
+| 5 | PHP / Motor DB / Versión DB | `8.3` / MySQL / `8.0` |
+| 6 | Contraseña | `secret123` |
+| 7 | Email | `admin@demo.test` |
+| 8 | Click «Crear proyecto» | — |
+| ✔ | Vuelve al dashboard y aparece «Mi Nuevo Sitio» (parado) | |
+
+### C.2 Encender / Detener
+
+| Paso | Acción |
+|--|--|
+| 1 | En «Blog Personal» (parado) click «Encender» |
+| ✔ | El botón pasa a «Detener»; el punto se pone verde |
+
+### C.3 Migrar (consola de progreso)
+
+| Paso | Acción |
+|--|--|
+| 1 | En «Sitio Importado» click «Migrar y encender» |
+| 2 | Confirmar el diálogo |
+| ✔ | Se abre la consola «Migración»; «Cerrar» está deshabilitado |
+| ✔ | Llegan líneas en vivo (…«Importando base de datos»…) |
+| ✔ | Al terminar: «✓ … migrado y encendido», «Cerrar» se habilita |
+| 3 | Click «Cerrar» → el sitio queda corriendo |
+
+### C.4 Cancelar importación
+
+| Paso | Acción |
+|--|--|
+| 1 | En «Sitio Importado» (pendiente) click «Cancelar» |
+| 2 | Confirmar el diálogo (avisa que borra la carpeta) |
+| ✔ | El proyecto desaparece de la lista (y su grupo LocalWP) |
+
+### C.5 Importar desde LocalWP
+
+| Paso | Acción |
+|--|--|
+| 1 | Ir a `/settings` → sección «Importar desde LocalWP» |
+| 2 | En «Proyecto Viejo» click «Importar» |
+| ✔ | Se abre la consola «Importar desde LocalWP» con progreso |
+| ✔ | Mensaje de éxito; el sitio queda pendiente en Proyectos |
+
+### C.6 Configuración
+
+| Paso | Acción |
+|--|--|
+| 1 | Ir a `/settings` |
+| ✔ | Checklist: Docker/Red ✓, Wrappers/Plasmoid ✗ (fixtures) |
+| ✔ | Endpoint con badge «puerto alterno» |
+| 2 | Click «Instalar» en Wrappers WP-CLI → pasa a ✓ |
+
+> En modo mock no hay IPC ni Docker reales (todo son fixtures). Para validar el
+> flujo end-to-end de verdad usa `pnpm tauri dev` + los tests `#[ignore]` de §A.2.
