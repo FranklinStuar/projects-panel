@@ -260,6 +260,20 @@ vhost + `nginx -s reload`) antes de generar el cert → reload fallaba. Reordena
 
 **Fase 4 completa.** Falta solo Fase 5 (asistente IA, `agent.rs`).
 
+## Testing — dos vías (ver `docs/TESTING.md`)
+
+- **Sin panel (lógica, Rust)**: unit puros (`cargo test`, sin Docker) para
+  `slugify`, mapeo de versiones LocalWP, `rotate_dumps`, `Endpoint::site_url` y
+  roundtrip serde camelCase. Integración `#[ignore]` en `integration_tests.rs`
+  (`cargo test -- --ignored --test-threads=1`): import LocalWP hermético (sin
+  Docker, vía `HOME`/`XDG` temporales), ciclo de DB y e2e crear→exportar→migrar.
+  `progress::log` y `migrate_site`/`import_site` ahora son genéricos sobre
+  `Runtime` para usar `tauri::test::mock_app()`.
+- **Con panel (GUI, Playwright)**: capa mock de IPC (`src/lib/dev/`) que sirve el
+  SPA con fixtures (`pnpm dev:mock`, `VITE_MOCK_IPC=1`); specs en `e2e/`
+  (dashboard, migrar, cancelar import, settings, nuevo, a11y) vía `pnpm test:e2e`.
+  No necesita backend ni Docker.
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).

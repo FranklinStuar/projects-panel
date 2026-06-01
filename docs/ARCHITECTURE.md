@@ -103,6 +103,11 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `dbus.rs` | Servidor D-Bus (zbus) para el plasmoid KDE; arranca en el `setup` de Tauri. Ver sección D-Bus. |
 | `backup.rs` | `export_db`: `wp db export` → `app/sql/db-{timestamp}.sql` (dump en la raíz pública montada, luego movido fuera de la raíz servida). `rotate_dumps`: deja solo los N `db-*.sql` más recientes. `stop_site` los invoca para exportar-al-detener. |
 | `cli.rs` | `install_cli_wrapper`: copia `wp` y `wordpress-panel-cli` a `~/.local/bin` (chmod 755). El `wp` detecta el proyecto por el CWD vía `wordpress-panel-cli detect-project`. |
+| `integration_tests.rs` | Solo en `#[cfg(test)]`: tests de integración `#[ignore]` (Docker / import LocalWP hermético). Ver `docs/TESTING.md §A.2`. |
+
+> **Testing**: lógica pura en `#[cfg(test)] mod tests` por módulo; integración en
+> `integration_tests.rs`; GUI con mock de IPC (`src/lib/dev/`) + Playwright
+> (`e2e/`). Detalle completo en `docs/TESTING.md`.
 
 ## Catálogo de comandos IPC
 

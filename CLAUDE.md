@@ -33,6 +33,12 @@ pnpm tauri dev               # GUI en desarrollo (vite :1420 + ventana Tauri)
 pnpm build                   # build frontend estático → build/
 cd src-tauri && cargo build  # solo backend
 bash scripts/first-run.sh    # primera config del sistema (panel-net, dnsmasq, mkcert)
+
+# Testing (ver docs/TESTING.md)
+cd src-tauri && cargo test               # lógica pura, rápido, sin Docker
+cargo test -- --ignored --test-threads=1 # integración (Docker / muta entorno)
+pnpm dev:mock                            # SPA con IPC mockeado (GUI sin backend)
+pnpm test:e2e                            # e2e GUI con Playwright (arranca dev:mock)
 ```
 
 En Wayland, si la ventana sale en blanco: `WEBKIT_DISABLE_DMABUF_RENDERER=1 pnpm tauri dev`.

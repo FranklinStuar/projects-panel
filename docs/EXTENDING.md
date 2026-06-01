@@ -88,10 +88,27 @@ En `docker.rs`:
 - Herramientas de escritura **siempre piden aprobación** (mostrar diff/comando)
   antes de aplicar. Ver sección "Agentes de IA" en `PLAN.md`.
 
+## Añadir un test (ver `docs/TESTING.md`)
+
+- **Lógica pura (Rust)**: `#[cfg(test)] mod tests` en el mismo módulo (accede a
+  funciones privadas). Corre con `cd src-tauri && cargo test`.
+- **Con Docker o que muta el entorno**: en `src-tauri/src/integration_tests.rs`,
+  `#[tokio::test]` + `#[ignore]`, nombre `zztest-*`, limpiando lo propio. Corre
+  con `cargo test -- --ignored --test-threads=1`. Si necesitas `&AppHandle` usa
+  `tauri::test::mock_app()` (las fns que emiten `op-log` son genéricas sobre
+  `Runtime`).
+- **GUI (escenario de clics)**: añade un mock para el comando en
+  `src/lib/dev/mock-ipc.ts` (devuelve copias frescas, no la referencia mutada) y
+  un spec en `e2e/`. Documenta el orden de clics en `docs/TESTING.md §C`. Corre
+  con `pnpm test:e2e`. Usa `{ exact: true }` para nombres de rol que sean
+  subcadena de otros.
+
 ## Checklist al terminar un cambio
 
 - [ ] Compila: `cd src-tauri && cargo build` y `pnpm build`.
 - [ ] Tipos TS sincronizados con modelos serde.
 - [ ] Comando registrado en `invoke_handler!` y en `api.ts`.
 - [ ] Servicios nuevos respetan la regla de recursos (on-demand + teardown).
+- [ ] Tests: `cargo test` y `pnpm test:e2e` verdes; si tocaste un flujo nuevo,
+      añade su test (lógica) y/o escenario (GUI mock).
 - [ ] `ARCHITECTURE.md` y `CHANGELOG.md` actualizados.
