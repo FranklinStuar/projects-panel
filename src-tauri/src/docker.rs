@@ -25,11 +25,13 @@ pub const NETWORK: &str = "panel-net";
 pub const NGINX: &str = "panel-nginx";
 pub const MAILPIT: &str = "panel-mailpit";
 pub const MINIO: &str = "panel-minio";
+pub const ADMINER: &str = "panel-adminer";
 
 /// Puertos host (solo 127.0.0.1) de las UIs de servicios compartidos.
 pub const MAILPIT_UI_PORT: u16 = 8025;
 pub const MINIO_API_PORT: u16 = 9100;
 pub const MINIO_CONSOLE_PORT: u16 = 9101;
+pub const ADMINER_UI_PORT: u16 = 8088;
 
 /// Prefijo común de todo lo que gestiona el panel (para detectar huérfanos).
 pub const PANEL_PREFIXES: &[&str] = &["wp-", "panel-"];
@@ -323,6 +325,62 @@ impl DockerManager {
             .context("creando container panel-minio")?;
         self.docker
             .start_container(MINIO, None::<StartContainerOptions<String>>)
+            .await?;
+        Ok(())
+    }
+
+    /// Arranca el visor de bases de datos compartido `panel-adminer` (Adminer 4).
+    /// UI web en `127.0.0.1:8088`; habla con los containers DB por `panel-net`.
+    /// On-demand: solo cuando un proyecto pide ver su base de datos.
+    ///
+    /// Monta `docker/adminer/autologin.php` como plugin (auto-login con las
+    /// credenciales del entorno, ver el propio archivo).
+    pub async fn ensure_adminer(&self) -> Result<()> {
+        if self.is_running(ADMINER).await {
+            return Ok(());
+        }
+        if self.exists(ADMINER).await {
+            self.docker
+                .start_container(ADMINER, None::<StartContainerOptions<String>>)
+                .await?;
+            return Ok(());
+        }
+        let image = "adminer:4";
+        self.ensure_image(image).await?;
+
+        let plugin = docker_assets_dir().join("adminer").join("autologin.php");
+
+        let ports = host_port_map(&[(ADMINER_UI_PORT, "8080/tcp")]);
+        let mut exposed = HashMap::new();
+        exposed.insert("8080/tcp".to_string(), HashMap::new());
+
+        let host_config = HostConfig {
+            network_mode: Some(NETWORK.to_string()),
+            port_bindings: Some(ports),
+            binds: Some(vec![format!(
+                "{}:/var/www/html/plugins-enabled/autologin.php:ro",
+                plugin.display()
+            )]),
+            ..Default::default()
+        };
+        let config = Config {
+            image: Some(image.to_string()),
+            exposed_ports: Some(exposed),
+            host_config: Some(host_config),
+            ..Default::default()
+        };
+        self.docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: ADMINER.to_string(),
+                    platform: None,
+                }),
+                config,
+            )
+            .await
+            .context("creando container panel-adminer")?;
+        self.docker
+            .start_container(ADMINER, None::<StartContainerOptions<String>>)
             .await?;
         Ok(())
     }
@@ -674,9 +732,9 @@ impl DockerManager {
                 .ok();
         }
 
-        // nginx + mailpit: si no queda ningún proyecto activo, apagarlos también.
+        // nginx + mailpit + adminer: si no queda proyecto activo, apagarlos también.
         if !any_active {
-            for svc in [NGINX, MAILPIT] {
+            for svc in [NGINX, MAILPIT, ADMINER] {
                 if self.is_running(svc).await {
                     self.docker
                         .stop_container(svc, Some(StopContainerOptions { t: 10 }))

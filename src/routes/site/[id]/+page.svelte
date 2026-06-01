@@ -455,9 +455,12 @@
       <div class="mb-3 whitespace-pre-wrap rounded border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300">{svcMsg}</div>
     {/if}
 
-    <!-- Backup -->
-    <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Backup</h3>
-    <div class="mb-4 flex items-center gap-2 text-sm">
+    <!-- Base de datos -->
+    <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Base de datos</h3>
+    <div class="mb-4 flex flex-wrap items-center gap-2 text-sm">
+      <button class="rounded bg-zinc-200 px-3 py-1.5 disabled:opacity-50 dark:bg-zinc-800"
+        disabled={svcBusy || site.status !== 'running'}
+        onclick={() => svcAction(() => api.openAdminer(id))}>Ver base de datos (Adminer)</button>
       <button class="rounded bg-zinc-200 px-3 py-1.5 disabled:opacity-50 dark:bg-zinc-800"
         disabled={svcBusy || site.status !== 'running'}
         onclick={() => svcAction(() => api.exportDb(id))}>Exportar base de datos</button>
