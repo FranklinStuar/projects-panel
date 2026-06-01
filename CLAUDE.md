@@ -77,6 +77,10 @@ scripts/                 first-run.sh, wp-wrapper.sh, wordpress-panel-cli.sh
   en migración (`docker exec -i … mysql`, `migrate::import_dump`) — el `exec` con
   stdin adjunto de bollard se cuelga con dumps grandes (su stream de salida no
   cierra al terminar el proceso).
+- **Eventos backend→frontend requieren capability.** Los comandos `#[tauri::command]`
+  no pasan por el ACL de Tauri 2, pero `app.emit`/`listen()` usan `core:event`, que
+  sí. La capability está en `src-tauri/capabilities/default.json` (autodescubierta).
+  Si un listener (p. ej. `OpConsole` con `op-log`) sale vacío, revísala primero.
 - **Container por proyecto NO publica puertos al host** — solo `panel-nginx` lo hace.
 - **Naming de containers**: proyecto = `wp-{site-id}`; compartidos = `panel-*`.
 - **Estado de recursos**: al detener un proyecto, apagar también los compartidos

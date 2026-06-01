@@ -155,6 +155,15 @@ container por evento; `op-log` — línea de progreso de una operación larga
 (migración/import), mostrada en `OpConsole.svelte`. El frontend se suscribe con `listen()` de `@tauri-apps/api/event`. Estado
 de los streams activos en `LogStreams` (managed state, `Mutex<HashMap>`).
 
+> **Capability obligatoria para eventos.** En Tauri 2 los comandos propios
+> (`#[tauri::command]`) no pasan por el ACL, pero `listen()`/`emit()` usan el
+> plugin `core:event`, que **sí** está gateado. Sin una capability que lo
+> conceda, `listen('op-log')` queda bloqueado y la consola sale vacía. La
+> capability vive en `src-tauri/capabilities/default.json` (`core:default` +
+> `core:event:default`, ventana `main`); Tauri autodescubre `capabilities/*.json`.
+> Al añadir cualquier evento nuevo backend→frontend, basta con que esa capability
+> siga concedida.
+
 ## D-Bus (plasmoid KDE)
 
 `dbus.rs` publica en la sesión del usuario el servicio

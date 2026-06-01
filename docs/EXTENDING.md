@@ -80,6 +80,11 @@ En `docker.rs`:
 - bollard expone `logs()` como stream. Envuélvelo en un módulo `logs.rs` y emítelo
   al frontend con Tauri events (`app.emit`), suscrito desde Svelte con
   `@tauri-apps/api/event`. No bloquear el hilo de comandos.
+- **Eventos = capability.** A diferencia de un comando propio, `app.emit` necesita
+  que `listen()` esté permitido por el ACL de Tauri 2. La capability
+  `src-tauri/capabilities/default.json` ya concede `core:event` a la ventana
+  `main`; mientras siga ahí, cualquier evento nuevo funciona sin tocar nada. Si la
+  consola/listener sale vacío, sospecha de esa capability antes que del emit.
 
 ## Proveedor de IA (Fase 5, `agent.rs`)
 
