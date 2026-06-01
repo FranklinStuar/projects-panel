@@ -120,6 +120,11 @@ async fn fix_site_url(docker: &DockerManager, site: &SiteConfig) -> Result<()> {
             docker,
             site,
             &[
+                // Saltar plugins/temas: actualizar una opción no los necesita y un
+                // sitio migrado puede traer un plugin que se cuelga al cargar
+                // (p. ej. llamada HTTP de licencia), bloqueando toda la migración.
+                "--skip-plugins".to_string(),
+                "--skip-themes".to_string(),
                 "option".to_string(),
                 "update".to_string(),
                 opt.to_string(),
@@ -135,21 +140,55 @@ async fn fix_site_url(docker: &DockerManager, site: &SiteConfig) -> Result<()> {
 /// stdin. Se hace dentro del container DB (socket local, sin TLS) en vez de con
 /// `wp db import` desde el container php, cuyo cliente falla la verificación del
 /// certificado autofirmado de MySQL 8.
+///
+/// Vía el CLI `docker exec -i` (excepción justificada al "Docker solo por
+/// bollard", como ya lo es `docker build` de la imagen php): el `exec_stdin` de
+/// bollard se cuelga con dumps grandes —su stream de salida no emite `None` al
+/// terminar un exec con stdin adjunto—, mientras que el CLI importa 7&nbsp;MB en
+/// ~15&nbsp;s. `wait_with_output` drena stdout/stderr a la vez que escribimos el
+/// dump por stdin, evitando el deadlock clásico de pipes.
 async fn import_dump(
-    docker: &DockerManager,
+    _docker: &DockerManager,
     site: &SiteConfig,
     db_container: &str,
     dump: &Path,
 ) -> Result<()> {
+    use std::process::Stdio;
+    use tokio::io::AsyncWriteExt;
+    use tokio::process::Command;
+
     let bytes = std::fs::read(dump)
         .with_context(|| format!("leyendo el dump {:?}", dump))?;
-    let dbname = &site.services.db.db_name;
-    docker
-        .exec_stdin(
-            db_container,
-            vec!["mysql", "-uroot", "-ppanel", dbname],
-            &bytes,
-        )
-        .await?;
+    let dbname = site.services.db.db_name.clone();
+
+    let mut child = Command::new("docker")
+        .args(["exec", "-i", db_container, "mysql", "-uroot", "-ppanel", &dbname])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("lanzando `docker exec` para importar el dump")?;
+
+    // Escribir el dump por stdin en una tarea aparte mientras `wait_with_output`
+    // drena stdout/stderr: si volcáramos todo sin leer, el pipe se llenaría y se
+    // colgaría.
+    let mut stdin = child.stdin.take().expect("stdin piped");
+    let writer = tokio::spawn(async move {
+        stdin.write_all(&bytes).await.ok();
+        stdin.shutdown().await.ok(); // EOF → mysql termina
+    });
+
+    let output = child
+        .wait_with_output()
+        .await
+        .context("esperando a `docker exec` (import)")?;
+    writer.await.ok();
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "import del dump falló en {db_container}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
     Ok(())
 }

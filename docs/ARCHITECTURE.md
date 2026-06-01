@@ -20,7 +20,7 @@ cosas ver `EXTENDING.md`. **Mantener este doc al día con el código.**
 │  │  wordpress / wpcli                       │  │
 │  └───────────────┬─────────────────────────┘  │
 └──────────────────┼────────────────────────────┘
-                   │ bollard (socket Docker) + CLI docker (solo build img)
+                   │ bollard (socket Docker) + CLI docker (build img, import dump)
         ┌──────────▼───────────────────────────┐
         │ Docker (red panel-net)                │
         │  Compartidos on-demand:               │

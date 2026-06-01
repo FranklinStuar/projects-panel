@@ -72,8 +72,11 @@ scripts/                 first-run.sh, wp-wrapper.sh, wordpress-panel-cli.sh
   mapear errores. Registrar el comando en `invoke_handler!` y exponerlo en `api.ts`.
 - **Fuente de verdad de proyectos** = el `config.json` en cada carpeta de
   `~/panel-wp/`. No hay base de datos central; `load_all_sites()` escanea.
-- **Docker solo vía bollard** en runtime (`DockerManager`). Excepción: build de la
-  imagen php usa el CLI `docker build` (`php.rs`).
+- **Docker solo vía bollard** en runtime (`DockerManager`). Excepciones (CLI
+  `docker`): build de la imagen php (`docker build`, `php.rs`) e import del dump
+  en migración (`docker exec -i … mysql`, `migrate::import_dump`) — el `exec` con
+  stdin adjunto de bollard se cuelga con dumps grandes (su stream de salida no
+  cierra al terminar el proceso).
 - **Container por proyecto NO publica puertos al host** — solo `panel-nginx` lo hace.
 - **Naming de containers**: proyecto = `wp-{site-id}`; compartidos = `panel-*`.
 - **Estado de recursos**: al detener un proyecto, apagar también los compartidos
