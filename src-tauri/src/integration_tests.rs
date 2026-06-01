@@ -45,6 +45,70 @@ async fn teardown(docker: &DockerManager, site: &SiteConfig) {
     std::fs::remove_dir_all(&site.path).ok();
 }
 
+/// Migración end-to-end de un sitio LocalWP **real** del usuario.
+///
+/// Valida el camino que se rompe de forma recurrente: que el dump de un sitio
+/// LocalWP grande se importe de verdad a la DB del proyecto (el `docker exec -i
+/// … mysql` por CLI en `migrate::import_dump`, porque el exec con stdin de
+/// bollard se cuelga con dumps grandes).
+///
+/// Opt-in por entorno — se **salta** si no defines el ID del sitio LocalWP a
+/// migrar (así es commiteable y no depende de la máquina de nadie):
+///
+/// ```text
+/// PANEL_TEST_LOCALWP_ID=ulNchSyst \
+///   cargo test -- --ignored --exact integration_tests::migra_localwp_real
+/// ```
+///
+/// El ID es la clave del sitio en `~/.config/Local/sites.json`.
+#[tokio::test]
+#[ignore = "real: migra un sitio LocalWP; requiere PANEL_TEST_LOCALWP_ID"]
+async fn migra_localwp_real() {
+    let Ok(localwp_id) = std::env::var("PANEL_TEST_LOCALWP_ID") else {
+        eprintln!("SKIP: define PANEL_TEST_LOCALWP_ID con la clave del sitio en sites.json");
+        return;
+    };
+
+    let app = mock();
+    // Importa el sitio real (lee ~/.config/Local/sites.json; copia archivos+dump).
+    let imp = crate::localwp::import_site(app.handle(), &localwp_id)
+        .unwrap_or_else(|e| panic!("import {localwp_id}: {e}"));
+    let site = imp.site.clone();
+    eprintln!("IMPORTADO: {} → {} (pending={})", site.name, site.domain, site.migration_pending);
+    assert!(site.migration_pending);
+
+    let docker = DockerManager::connect().expect("docker");
+    docker.ensure_network().await.expect("panel-net");
+
+    let mig = crate::migrate::migrate_site(app.handle(), &docker, &site)
+        .await
+        .expect("migrate");
+    eprintln!("MIGRADO: pending={} note={:?}", mig.site.migration_pending, mig.note);
+    assert!(!mig.site.migration_pending);
+    assert!(docker.is_running(&site.container_name()).await, "wp-{} arriba", site.id);
+
+    // El corazón del test: el dump entró. Cuenta tablas en la DB del proyecto y
+    // exige al menos una (una migración silenciosamente vacía es el bug a cazar).
+    let db = crate::docker::db_container_name(&site.services.db);
+    let out = docker
+        .exec(&db, vec!["mysql", "-uroot", "-ppanel", "-N", "-e",
+            &format!("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='{}'", site.services.db.db_name)])
+        .await
+        .unwrap_or_default();
+    let tablas: u64 = out.trim().parse().unwrap_or(0);
+    eprintln!("TABLAS en {}: {}", site.services.db.db_name, tablas);
+
+    // Limpieza antes del assert para no dejar basura si falla.
+    teardown(&docker, &site).await;
+    let _ = docker
+        .exec(&db, vec!["mysql", "-uroot", "-ppanel", "-e",
+            &format!("DROP DATABASE IF EXISTS `{}`", site.services.db.db_name)])
+        .await;
+    eprintln!("LIMPIO");
+
+    assert!(tablas > 0, "el dump no importó ninguna tabla a {}", site.services.db.db_name);
+}
+
 fn req_para(nombre: &str) -> NewSiteRequest {
     NewSiteRequest {
         name: nombre.to_string(),

@@ -10,7 +10,6 @@ use bollard::container::{
     StartContainerOptions, StopContainerOptions,
 };
 use bollard::exec::{CreateExecOptions, StartExecResults};
-use tokio::io::AsyncWriteExt;
 use bollard::image::CreateImageOptions;
 use bollard::models::{HostConfig, PortBinding};
 use bollard::network::CreateNetworkOptions;
@@ -772,53 +771,10 @@ impl DockerManager {
         Ok(out)
     }
 
-    /// Ejecuta un comando alimentando `input` por stdin (p. ej. importar un dump
-    /// SQL en el cliente `mysql` del container DB). El cliente conecta por socket
-    /// local → sin TLS (evita el "self-signed certificate" del MySQL 8).
-    pub async fn exec_stdin(&self, container: &str, cmd: Vec<&str>, input: &[u8]) -> Result<String> {
-        let exec = self
-            .docker
-            .create_exec(
-                container,
-                CreateExecOptions {
-                    cmd: Some(cmd.iter().map(|s| s.to_string()).collect()),
-                    attach_stdin: Some(true),
-                    attach_stdout: Some(true),
-                    attach_stderr: Some(true),
-                    ..Default::default()
-                },
-            )
-            .await
-            .with_context(|| format!("create_exec (stdin) en {container}"))?;
-
-        let mut out = String::new();
-        if let StartExecResults::Attached {
-            mut output,
-            input: mut stdin,
-        } = self.docker.start_exec(&exec.id, None).await?
-        {
-            // El dump entra entero y luego se cierra stdin (EOF). El stdout del
-            // cliente mysql es mínimo, así que escribir-luego-leer no bloquea.
-            stdin.write_all(input).await?;
-            stdin.flush().await?;
-            drop(stdin);
-            while let Some(chunk) = output.next().await {
-                out.push_str(&chunk?.to_string());
-            }
-        }
-
-        let inspect = self.docker.inspect_exec(&exec.id).await?;
-        if let Some(code) = inspect.exit_code {
-            if code != 0 {
-                let cmd = cmd.join(" ");
-                return Err(anyhow!(
-                    "`{cmd}` falló en {container} (código {code}): {}",
-                    out.trim()
-                ));
-            }
-        }
-        Ok(out)
-    }
+    // Nota: importar un dump por stdin se hace con el CLI `docker exec -i` en
+    // `migrate::import_dump`, NO por bollard. El `exec` con stdin adjunto de
+    // bollard se colgaba con dumps grandes (su stream de salida no emite `None`
+    // al terminar el proceso). Ver el comentario en `migrate::import_dump`.
 
     /// Ejecuta un comando y captura su **stdout** como bytes (stderr aparte, para
     /// el mensaje de error). Para volcados binarios/grandes como `mysqldump`.

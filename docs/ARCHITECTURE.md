@@ -20,7 +20,7 @@ cosas ver `EXTENDING.md`. **Mantener este doc al día con el código.**
 │  │  wordpress / wpcli                       │  │
 │  └───────────────┬─────────────────────────┘  │
 └──────────────────┼────────────────────────────┘
-                   │ bollard (socket Docker) + CLI docker (solo build img)
+                   │ bollard (socket Docker) + CLI docker (build img, import dump)
         ┌──────────▼───────────────────────────┐
         │ Docker (red panel-net)                │
         │  Compartidos on-demand:               │
@@ -154,6 +154,15 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 container por evento; `op-log` — línea de progreso de una operación larga
 (migración/import), mostrada en `OpConsole.svelte`. El frontend se suscribe con `listen()` de `@tauri-apps/api/event`. Estado
 de los streams activos en `LogStreams` (managed state, `Mutex<HashMap>`).
+
+> **Capability obligatoria para eventos.** En Tauri 2 los comandos propios
+> (`#[tauri::command]`) no pasan por el ACL, pero `listen()`/`emit()` usan el
+> plugin `core:event`, que **sí** está gateado. Sin una capability que lo
+> conceda, `listen('op-log')` queda bloqueado y la consola sale vacía. La
+> capability vive en `src-tauri/capabilities/default.json` (`core:default` +
+> `core:event:default`, ventana `main`); Tauri autodescubre `capabilities/*.json`.
+> Al añadir cualquier evento nuevo backend→frontend, basta con que esa capability
+> siga concedida.
 
 ## D-Bus (plasmoid KDE)
 

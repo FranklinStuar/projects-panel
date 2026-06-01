@@ -3,7 +3,7 @@
   // evento `op-log` del backend (ver src-tauri/src/progress.rs) y muestra las
   // líneas en vivo en un modal. Mientras `running`, el botón Cerrar se desactiva.
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-  import { onDestroy } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
 
   let {
     open = false,
@@ -14,21 +14,23 @@
 
   let lines = $state<string[]>([]);
   let un: UnlistenFn | null = null;
-  let listening = false;
+  let wasOpen = false;
+
   let box = $state<HTMLPreElement | null>(null);
 
+  // Engancha el listener al montar (no al abrir): `listen` es async y la
+  // operación —migración/import— arranca su `invoke` en el mismo tick que se abre
+  // la consola; si esperáramos a `open` se perderían las primeras líneas.
+  onMount(() => {
+    listen<string>('op-log', (e) => {
+      lines = [...lines.slice(-300), e.payload];
+    }).then((u) => (un = u));
+  });
+
+  // Limpia el buffer al inicio de cada operación (transición cerrado→abierto).
   $effect(() => {
-    if (open && !listening) {
-      listening = true;
-      lines = [];
-      listen<string>('op-log', (e) => {
-        lines = [...lines.slice(-300), e.payload];
-      }).then((u) => (un = u));
-    } else if (!open && listening) {
-      listening = false;
-      un?.();
-      un = null;
-    }
+    if (open && !wasOpen) lines = [];
+    wasOpen = open;
   });
 
   // Autoscroll al final cuando llegan líneas.

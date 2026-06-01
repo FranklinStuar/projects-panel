@@ -258,6 +258,51 @@ vhost + `nginx -s reload`) antes de generar el cert → reload fallaba. Reordena
   `delete_site` (apaga + quita container/vhost + borra la carpeta). Para deshacer
   una importación del proyecto equivocado.
 
+### Fix — migración se colgaba importando dumps grandes
+
+Migrar un sitio real (p. ej. desde LocalWP) se quedaba clavado tras "Generando
+certificado SSL" y no avanzaba nunca (minutos hasta matar la app). Causa: la
+importación del dump usaba `DockerManager::exec_stdin` (bollard, `exec` con stdin
+adjunto). Con stdin adjunto el **stream de salida de bollard no emite `None`** al
+terminar el proceso, así que tras volcar el dump el lector quedaba esperando para
+siempre. Dumps chicos (~1&nbsp;MB) colaban de chiripa; uno de 7&nbsp;MB colgaba.
+
+- **`migrate.rs`**: `import_dump` ahora usa el CLI **`docker exec -i … mysql`**
+  (excepción al "Docker solo por bollard", como ya lo era `docker build` de la
+  imagen php). `wait_with_output` drena stdout/stderr mientras una tarea escribe
+  el dump por stdin → sin deadlock de pipe. Importa 7&nbsp;MB en ~15&nbsp;s.
+- **`docker.rs`**: eliminado `exec_stdin` (quedaba sin uso y era justo el que se
+  colgaba); nota en su lugar apuntando a `migrate::import_dump`.
+- **`wpcli.rs`**: timeout defensivo de 120&nbsp;s en todo WP-CLI. WP-CLI arranca
+  WordPress entero; un plugin/mu-plugin del sitio que haga una llamada de red al
+  cargar (licencia/update-check; p. ej. UpdraftPlus) colgaría el comando —y la
+  migración— indefinidamente. `migrate::fix_site_url` además corre con
+  `--skip-plugins --skip-themes` (no carga plugins normales para repuntar URLs).
+- **`OpConsole.svelte`**: el listener de `op-log` se engancha en `onMount`, no al
+  abrir. `listen()` es async y competía con el `invoke` de la operación en el
+  mismo tick → se perdían las primeras líneas de progreso (la consola salía
+  vacía). Ahora limpia el buffer al abrir y no pierde líneas.
+
+### Fix — consola de progreso vacía: faltaba la capability de eventos
+
+La migración funcionaba pero la consola (`OpConsole`) salía **vacía**: solo se veía
+el ícono verde al terminar, sin ninguna línea de progreso ni el error si fallaba.
+Causa: el proyecto **no tenía ninguna capability de Tauri 2**. Los comandos propios
+(`#[tauri::command]`) no pasan por el ACL y por eso `migrate_site` funcionaba, pero
+`listen('op-log')` usa el plugin **`core:event`**, que sí está gateado por permisos;
+sin capability que lo conceda, el `listen` quedaba bloqueado y nunca llegaban los
+eventos. Los tests e2e usan IPC mockeado (no Tauri real), así que no lo detectaban.
+
+- **`src-tauri/capabilities/default.json`** (nuevo): concede `core:default` +
+  `core:event:default` a la ventana `main`. Tauri 2 autodescubre `capabilities/*.json`,
+  no hace falta tocar `tauri.conf.json`.
+- **`migrate.rs`**: mensajes de progreso más descriptivos y numerados (`[n/6]`):
+  arrancar DB + esquema, SSL, encender, regenerar wp-config, importar dump (con
+  nombre y tamaño), ajustar URLs (con el destino `scheme://dominio`). El flujo real
+  va en `run_migration`; `migrate_site` lo envuelve y, ante **cualquier** error,
+  emite una línea `✗ La migración falló: …` a la consola antes de propagarlo, para
+  que el fallo se vea ahí y no solo en el banner.
+
 **Fase 4 completa.** Falta solo Fase 5 (asistente IA, `agent.rs`).
 
 ## Testing — dos vías (ver `docs/TESTING.md`)
