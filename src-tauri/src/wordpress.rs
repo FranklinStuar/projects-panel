@@ -274,6 +274,32 @@ pub(crate) async fn create_database(
     Ok(())
 }
 
+/// Borra y recrea vacía la base de datos del proyecto. Lo usa la migración para
+/// revertir un import cancelado/colgado: un dump aplicado a medias deja la DB
+/// corrupta, así que se descarta y se deja como estaba antes de importar (vacía).
+pub(crate) async fn reset_database(
+    docker: &DockerManager,
+    db_container: &str,
+    site: &SiteConfig,
+) -> Result<()> {
+    let db = &site.services.db;
+    match db.db_type {
+        DbType::Mysql | DbType::Mariadb => {
+            let sql = format!("DROP DATABASE IF EXISTS `{}`;", db.db_name);
+            docker
+                .exec(db_container, vec!["mysql", "-uroot", "-ppanel", "-e", &sql])
+                .await?;
+        }
+        DbType::Postgres => {
+            let sql = format!("DROP DATABASE IF EXISTS \"{}\";", db.db_name);
+            docker
+                .exec(db_container, vec!["psql", "-U", "panel", "-c", &sql])
+                .await?;
+        }
+    }
+    create_database(docker, db_container, site).await
+}
+
 /// Genera `wp-config.php` con las credenciales del panel (`--force` lo reescribe).
 /// Lo reusa la migración para repuntar un proyecto traído de otro sistema.
 pub(crate) async fn wp_config_create(
