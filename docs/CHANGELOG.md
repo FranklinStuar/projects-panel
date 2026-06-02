@@ -412,6 +412,30 @@ la DB a medio importar (corrupta) si se mataba la app. Tres cambios en
 - **Fix**: añadido `--user www-data` al `docker exec` del wrapper. El refresco del
   script se aplica solo al reabrir el panel (auto-instalación idempotente).
 
+## Borrar proyecto (con opción de conservar la carpeta)
+
+Botón **"Eliminar"** en el dashboard (cada tarjeta) y en la vista de proyecto,
+para cualquier proyecto (no solo importaciones pendientes — eso ya lo cubría
+"Cancelar").
+
+- **Siempre borra todos los datos**: apaga + quita container/vhost + **`DROP
+  DATABASE`** del esquema del proyecto en el servidor de DB compartido
+  (`wordpress::drop_database`, nuevo — antes `delete_site` dejaba el esquema
+  vivo). Tras el drop, `teardown_unused_shared` re-apaga el container de DB si
+  ningún otro activo lo usa.
+- **Dos confirmaciones**: 1) confirmar el borrado de datos; 2) ¿borrar también la
+  carpeta del disco?
+  - **Sí** → `remove_dir_all` de la carpeta del proyecto.
+  - **No** → conserva la carpeta y solo elimina su `config.json`, así el panel la
+    olvida (queda "desconectada"); `app/public`, `conf` y los dumps de `app/sql`
+    siguen en disco para reconfigurarla más tarde. `stop_site` deja un dump
+    fresco antes de apagar.
+- **API**: `delete_site` pasa de `(id)` a `(id, deleteFolder)`; `api.deleteSite`
+  espejo. "Cancelar importación" ahora llama con `deleteFolder=true` (borra todo,
+  como antes).
+- **Tests**: `e2e/delete-site.spec.ts` cubre las tres ramas (borrar todo,
+  conservar carpeta, abortar en la 1ª confirmación). Suite e2e completa: 15/15.
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).

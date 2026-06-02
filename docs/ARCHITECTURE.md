@@ -129,7 +129,7 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `create_panel_network` | — | `()` | Crea el bridge `panel-net` si falta. |
 | `reset_endpoint` | — | `()` | Olvida el endpoint persistido (reasigna puerto al próximo arranque). |
 | `migrate_site` | `id` | `Migration` | Migra un proyecto pendiente (DB + dump + SSL) y lo enciende. Emite `op-log`. |
-| `delete_site` | `id` | `()` | Borra un proyecto (apaga + container/vhost + carpeta). Cancela una importación. |
+| `delete_site` | `id`, `deleteFolder` | `()` | Borra un proyecto: apaga + container/vhost + DROP de su DB del servidor compartido. `deleteFolder=true` borra la carpeta entera; `false` solo quita `config.json` (la desconecta del panel; los archivos quedan para reconfigurar). |
 | `list_localwp_sites` | — | `Vec<LocalSite>` | Sitios de LocalWP candidatos a importar. |
 | `import_localwp_site` | `id` | `ImportResult` | Importa un sitio de LocalWP (queda `migrationPending`). |
 | `open_admin` | `id` | `()` | Abre el admin en el navegador (auto-login si está activo). |
