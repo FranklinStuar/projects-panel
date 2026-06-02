@@ -66,6 +66,9 @@ scripts/                 first-run.sh, wp-wrapper.sh, wordpress-panel-cli.sh
 
 ## Convenciones (no romper)
 
+- **Commits / PRs**: NO añadir a Anthropic/Claude como coautor ni firmas tipo
+  `Co-Authored-By: Claude` o "Generated with Claude Code". Mensajes limpios, sin
+  atribución de la herramienta.
 - **Modelos serde en `camelCase`** (`#[serde(rename_all="camelCase")]`); los tipos
   de `src/lib/types.ts` deben ser su espejo exacto.
 - **Comandos Tauri** devuelven `Result<T, String>`; usar el helper `e()` para
