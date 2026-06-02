@@ -403,6 +403,15 @@ la DB a medio importar (corrupta) si se mataba la app. Tres cambios en
   (`wp plugin list`, `wp user list`) y aviso de no usar `sudo`. Se conserva «Solo
   instalar wrapper `wp`» para reinstalar/reparar. `api.openTerminal`.
 
+## Fix — el wrapper `wp` de terminal corría como root
+
+- **Bug**: `scripts/wp-wrapper.sh` hacía `docker exec` **sin** `--user www-data`,
+  así WP-CLI arrancaba WordPress como root → bloqueo anti-root (`YIKES! …running
+  this as root`). `wp cli info` funcionaba (no bootea WP) pero `wp plugin list` no.
+  El comando in-app `exec_wpcli` sí usaba www-data; el wrapper se quedó sin paridad.
+- **Fix**: añadido `--user www-data` al `docker exec` del wrapper. El refresco del
+  script se aplica solo al reabrir el panel (auto-instalación idempotente).
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).

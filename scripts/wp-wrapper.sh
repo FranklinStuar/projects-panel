@@ -10,4 +10,6 @@ if [ -z "$PROJECT_ID" ]; then
     exit 1
 fi
 
-exec docker exec -i "wp-${PROJECT_ID}" php /usr/local/bin/wp --path=/var/www/html "$@"
+# Como www-data: WP-CLI prohíbe correr WordPress como root y rompería la
+# propiedad de los archivos del sitio (paridad con el comando in-app exec_wpcli).
+exec docker exec -i --user www-data "wp-${PROJECT_ID}" php /usr/local/bin/wp --path=/var/www/html "$@"
