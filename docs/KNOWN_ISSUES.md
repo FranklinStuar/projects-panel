@@ -10,6 +10,17 @@ migración repunta `home`/`siteurl` al dominio `.test`, pero **no** hace
 `search-replace` del contenido (URLs `*.local` embebidas en posts siguen ahí);
 si hace falta, correr `wp search-replace` manualmente tras migrar.
 
+## Importar proyecto: carpetas sin config (`reconstructed`) son best-effort
+
+`import_disconnected_site` re-importa sin pérdida las carpetas con
+`config.disconnected.json` (`preserved`). Para carpetas viejas **sin** ninguna
+config (`reconstructed`) la metadata se deduce best-effort: nombre = carpeta,
+dominio `{slug}.test`, `dbName` parseado de `wp-config.php` (o el slug), y
+**versiones PHP/DB por defecto** (8.3 / MySQL 8.0) — pueden no coincidir con las
+originales. Tras importar, revisa dominio y versiones en `/site/[id]` antes de
+«Migrar y encender». (Las carpetas desconectadas por el propio panel siempre son
+`preserved`, así que esto solo aplica a carpetas traídas de fuera sin sidecar.)
+
 ## Botones de la barra de título no respetan la config de KDE
 
 **Síntoma:** en KDE/Wayland los botones (cerrar/min/max) no aparecen donde el

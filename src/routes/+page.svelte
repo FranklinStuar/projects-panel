@@ -4,6 +4,7 @@
   import type { SiteState, Endpoint } from '$lib/types';
   import OpConsole from '$lib/components/OpConsole.svelte';
   import DeleteProjectModal from '$lib/components/DeleteProjectModal.svelte';
+  import ImportProjectModal from '$lib/components/ImportProjectModal.svelte';
 
   let sites = $state<SiteState[]>([]);
   let endpoint = $state<Endpoint | null>(null);
@@ -83,6 +84,9 @@
   // Proyecto en proceso de borrado (abre el modal de confirmación + consola).
   let deleteTarget = $state<SiteState | null>(null);
 
+  // Modal "Importar proyecto" (carpetas desconectadas en ~/panel-wp/).
+  let importOpen = $state(false);
+
   async function migrate(s: SiteState) {
     if (!confirm(`Migrar "${s.config.name}" a este sistema (crear DB, importar dump, regenerar SSL) y encender?`))
       return;
@@ -134,6 +138,12 @@
           {runningCount}
         </span>
       {/if}
+    </button>
+    <button
+      class="rounded bg-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700"
+      onclick={() => (importOpen = true)}
+    >
+      Importar proyecto
     </button>
     <a
       href="/site/new"
@@ -226,3 +236,5 @@
 <OpConsole open={consoleOpen} running={migrating} title="Migración" onClose={() => (consoleOpen = false)} />
 
 <DeleteProjectModal bind:site={deleteTarget} onClose={(deleted) => deleted && load()} />
+
+<ImportProjectModal bind:open={importOpen} onClose={(imported) => imported && load()} />
