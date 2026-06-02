@@ -61,6 +61,10 @@ export function installMockIpc() {
         return localSites.map((l) => ({ ...l }));
       case 'gh_status':
         return { installed: true, authenticated: false, user: null };
+      case 'gh_scan':
+        return [];
+      case 'open_vscode':
+        return null;
 
       // --- ciclo de vida ---
       case 'start_site': {

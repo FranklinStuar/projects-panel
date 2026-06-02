@@ -99,7 +99,7 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `wpcli.rs` | `run()` WP-CLI dentro del container del proyecto, como `www-data` (WP-CLI rechaza root). |
 | `logs.rs` | `spawn_stream`: sigue (`follow`) los logs del container y los emite como evento `log:{id}`. Cancelable vía `JoinHandle::abort()`. |
 | `autologin.rs` | `open_admin`: token efímero (transient WP, 60s, un solo uso) + abre navegador; el mu-plugin `panel-autologin.php` valida y loguea al admin. El mu-plugin lo inyecta `wordpress::sync_mu_plugins` al crear/migrar; `repair_autologin` lo reinyecta en proyectos viejos (import LocalWP) que no lo traían. |
-| `github.rs` | `gh`/`git` en el HOST (no container, los archivos están bind-montados): `status`, `clone`, `pull`, `remove_dir`, `propose_path`. Sin auth propia. |
+| `github.rs` | `gh`/`git` en el HOST (no container, los archivos están bind-montados): `status`, `clone`, `pull`, `remove_dir`, `propose_path`. `scan` autodetecta repos git bajo wp-content (`DetectedRepo`); `read_repo_meta` lee remoto/rama de un huérfano; `open_vscode` + `ensure_workspace` (genera `.code-workspace` multi-root, una vez). Repos en `github.repos` (lista genérica; `GithubConfig::normalize` pliega el legacy theme/plugins). Sin auth propia. |
 | `ssl.rs` | `generate`: cert/key por dominio con mkcert en `ssl/` del proyecto. La CA local (`mkcert -install`) se hace una vez en `first-run.sh`. |
 | `dbus.rs` | Servidor D-Bus (zbus) para el plasmoid KDE; arranca en el `setup` de Tauri. Ver sección D-Bus. |
 | `backup.rs` | `export_db`: `wp db export` → `app/sql/db-{timestamp}.sql` (dump en la raíz pública montada, luego movido fuera de la raíz servida). `rotate_dumps`: deja solo los N `db-*.sql` más recientes. `stop_site` los invoca para exportar-al-detener. |
@@ -139,10 +139,13 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `list_plugins` | `id` | `String` (JSON) | `wp plugin list`. |
 | `list_themes` | `id` | `String` (JSON) | `wp theme list`. |
 | `gh_status` | — | `GhStatus` | gh instalado/autenticado + usuario. |
-| `gh_clone` | `id, kind, repo, branch` | `SiteConfig` | Clona theme/plugin + registra en config.json. |
+| `gh_clone` | `id, kind, repo, branch, path?` | `SiteConfig` | Clona repo + registra en `github.repos`. `kind` (theme/plugin/muplugin) propone ruta bajo wp-content; `path` explícito (rel. a public/) la sobreescribe → cualquier ubicación. |
 | `gh_pull` | `id, path, branch` | `String` | `git pull` de una carpeta. |
-| `gh_pull_all` | `id` | `String` | Pull de theme + todos los plugins. |
-| `gh_remove` | `id, kind, path` | `SiteConfig` | Borra carpeta + desregistra. |
+| `gh_pull_all` | `id` | `String` | Pull de todos los repos registrados. |
+| `gh_remove` | `id, path` | `SiteConfig` | Borra carpeta + desregistra de `github.repos`. |
+| `gh_scan` | `id` | `Vec<DetectedRepo>` | Escanea `wp-content` (prof. 4, salta node_modules/vendor) y lista repos git registrados + huérfanos (remoto, rama, `registered`). |
+| `gh_register` | `id, path` | `SiteConfig` | Registra en config un git huérfano ya en disco (lee remoto/rama). No clona. |
+| `open_vscode` | `id` | `()` | Genera (una vez) `<nombre>.code-workspace` (public/ principal + repos git detectados) y lo abre en VSCode/VSCodium. |
 | `regenerate_ssl` | `id` | `()` | Regenera cert mkcert + reload nginx. |
 | `set_site_group` | `id, group?` | `SiteConfig` | Asigna/quita grupo del proyecto. |
 | `set_site_minio` | `id, enabled` | `SiteConfig` | Activa/desactiva MinIO; arranca el servicio si el proyecto corre. |

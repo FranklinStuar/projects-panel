@@ -416,30 +416,30 @@ fn load_site(id: &str) -> CmdResult<SiteConfig> {
         .ok_or_else(|| format!("proyecto {id} no encontrado"))
 }
 
-/// Clona un repo (kind = "theme" | "plugin") y lo registra en config.json.
+/// Clona un repo y lo registra en config.json. `kind` ("theme"|"plugin"|
+/// "muplugin") propone una ruta bajo wp-content; si se pasa `path` explícito
+/// (relativo a public/) tiene prioridad, así el repo puede ir a cualquier sitio.
 #[tauri::command]
 async fn gh_clone(
     id: String,
     kind: String,
     repo: String,
     branch: String,
+    path: Option<String>,
 ) -> CmdResult<SiteConfig> {
     let mut site = load_site(&id)?;
-    let rel_path = github::propose_path(&kind, &repo);
+    let rel_path = path
+        .filter(|p| !p.trim().is_empty())
+        .unwrap_or_else(|| github::propose_path(&kind, &repo));
     github::clone(&site, &repo, &branch, &rel_path)
         .await
         .map_err(e)?;
 
-    let entry = config::GithubRepo {
+    site.github.repos.push(config::GithubRepo {
         repo,
         branch,
         path: rel_path,
-    };
-    if kind == "theme" {
-        site.github.theme = Some(entry);
-    } else {
-        site.github.plugins.push(entry);
-    }
+    });
     config::write_site_config(&site).map_err(e)?;
     Ok(site)
 }
@@ -454,29 +454,56 @@ async fn gh_pull(id: String, path: String, branch: String) -> CmdResult<String> 
 async fn gh_pull_all(id: String) -> CmdResult<String> {
     let site = load_site(&id)?;
     let mut out = String::new();
-    if let Some(t) = &site.github.theme {
-        out.push_str(&format!("== theme {} ==\n", t.repo));
-        out.push_str(&github::pull(&site, &t.path, &t.branch).await.unwrap_or_else(|err| e(err)));
+    for r in &site.github.repos {
+        out.push_str(&format!("== {} ({}) ==\n", r.path, r.repo));
+        out.push_str(&github::pull(&site, &r.path, &r.branch).await.unwrap_or_else(|err| e(err)));
+        out.push('\n');
     }
-    for p in &site.github.plugins {
-        out.push_str(&format!("\n== plugin {} ==\n", p.repo));
-        out.push_str(&github::pull(&site, &p.path, &p.branch).await.unwrap_or_else(|err| e(err)));
+    if out.is_empty() {
+        out.push_str("No hay repos registrados.");
     }
     Ok(out)
 }
 
 /// Quita un repo: borra la carpeta y lo desregistra de config.json.
 #[tauri::command]
-async fn gh_remove(id: String, kind: String, path: String) -> CmdResult<SiteConfig> {
+async fn gh_remove(id: String, path: String) -> CmdResult<SiteConfig> {
     let mut site = load_site(&id)?;
     github::remove_dir(&site, &path).map_err(e)?;
-    if kind == "theme" {
-        site.github.theme = None;
-    } else {
-        site.github.plugins.retain(|p| p.path != path);
-    }
+    site.github.repos.retain(|r| r.path != path);
     config::write_site_config(&site).map_err(e)?;
     Ok(site)
+}
+
+/// Escanea wp-content buscando repos git (registrados o huérfanos).
+#[tauri::command]
+async fn gh_scan(id: String) -> CmdResult<Vec<github::DetectedRepo>> {
+    let site = load_site(&id)?;
+    Ok(github::scan(&site).await)
+}
+
+/// Registra en config.json un repo git ya presente en disco (huérfano), leyendo
+/// su remoto y rama actuales. No clona ni descarga nada.
+#[tauri::command]
+async fn gh_register(id: String, path: String) -> CmdResult<SiteConfig> {
+    let mut site = load_site(&id)?;
+    if site.github.repos.iter().any(|r| r.path == path) {
+        return Ok(site); // ya registrado
+    }
+    let (repo, branch) = github::read_repo_meta(&site, &path).await.map_err(e)?;
+    site.github.repos.push(config::GithubRepo { repo, branch, path });
+    config::write_site_config(&site).map_err(e)?;
+    Ok(site)
+}
+
+/// Abre el proyecto en VSCode. Genera (si no existe) un `.code-workspace` con
+/// app/public como carpeta principal y cada repo git detectado como adicional,
+/// y abre ese workspace.
+#[tauri::command]
+async fn open_vscode(id: String) -> CmdResult<()> {
+    let site = load_site(&id)?;
+    let ws = github::ensure_workspace(&site).await.map_err(e)?;
+    github::open_vscode(&ws).map_err(e)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -542,6 +569,9 @@ pub fn run() {
             gh_pull,
             gh_pull_all,
             gh_remove,
+            gh_scan,
+            gh_register,
+            open_vscode,
             regenerate_ssl,
             set_site_group,
             set_site_minio,
