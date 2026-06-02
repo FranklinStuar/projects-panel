@@ -3,6 +3,7 @@
   import { api } from '$lib/api';
   import type { SiteState, Endpoint } from '$lib/types';
   import OpConsole from '$lib/components/OpConsole.svelte';
+  import DeleteProjectModal from '$lib/components/DeleteProjectModal.svelte';
 
   let sites = $state<SiteState[]>([]);
   let endpoint = $state<Endpoint | null>(null);
@@ -79,32 +80,8 @@
     }
   }
 
-  // Borra un proyecto: siempre elimina los datos (base de datos + containers) y
-  // luego pregunta si borrar también la carpeta del disco. Si se conserva, el
-  // panel la olvida (desconecta) pero los archivos quedan para reconfigurar.
-  async function deleteProject(s: SiteState) {
-    if (
-      !confirm(
-        `Eliminar "${s.config.name}"?\n\nSe borrarán todos los datos del proyecto (base de datos y containers). Esta acción no se puede deshacer.`
-      )
-    )
-      return;
-    const deleteFolder = confirm(
-      `¿Borrar también la carpeta del proyecto en disco?\n${s.config.path}\n\n` +
-        `Aceptar: borrar la carpeta (no queda nada).\n` +
-        `Cancelar: conservarla — el panel la desconecta, pero los archivos quedan para reconfigurarla más tarde.`
-    );
-    busy = { ...busy, [s.config.id]: true };
-    error = null;
-    try {
-      await api.deleteSite(s.config.id, deleteFolder);
-      await load();
-    } catch (e) {
-      error = String(e);
-    } finally {
-      busy = { ...busy, [s.config.id]: false };
-    }
-  }
+  // Proyecto en proceso de borrado (abre el modal de confirmación + consola).
+  let deleteTarget = $state<SiteState | null>(null);
 
   async function migrate(s: SiteState) {
     if (!confirm(`Migrar "${s.config.name}" a este sistema (crear DB, importar dump, regenerar SSL) y encender?`))
@@ -233,7 +210,7 @@
                   class="rounded px-2 py-1.5 text-sm text-zinc-400 hover:text-red-500 disabled:opacity-50"
                   disabled={busy[s.config.id]}
                   title="Eliminar proyecto"
-                  onclick={() => deleteProject(s)}
+                  onclick={() => (deleteTarget = s)}
                 >
                   Eliminar
                 </button>
@@ -247,3 +224,5 @@
 {/if}
 
 <OpConsole open={consoleOpen} running={migrating} title="Migración" onClose={() => (consoleOpen = false)} />
+
+<DeleteProjectModal bind:site={deleteTarget} onClose={(deleted) => deleted && load()} />

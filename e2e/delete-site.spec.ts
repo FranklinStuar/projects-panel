@@ -1,63 +1,76 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// Borrar un proyecto: el botón "Eliminar" pide dos confirmaciones (1: borrar
-// datos; 2: ¿borrar también la carpeta?) y luego lo quita de la lista.
-// Ver docs/TESTING.md §C.
+// Borrar un proyecto: el botón "Eliminar" abre un modal de confirmación con el
+// NOMBRE del proyecto y un checkbox para borrar también la carpeta. Al confirmar,
+// una consola muestra una ventana de gracia de 5 s con "Cancelar borrado" antes
+// de proceder. Ver docs/TESTING.md §C.
 
-// Fila (card) de un proyecto: el div que contiene su enlace y sus botones.
+// Fila (card) de un proyecto en el dashboard.
 function card(page: Page, name: string) {
   return page
     .locator('div.justify-between')
     .filter({ has: page.getByRole('link', { name, exact: true }) });
 }
 
-test('eliminar proyecto: dos confirmaciones y desaparece de la lista', async ({ page }) => {
-  const dialogs: string[] = [];
-  page.on('dialog', (d) => {
-    dialogs.push(d.message());
-    d.accept(); // acepta ambas: borrar datos + borrar carpeta
-  });
-
+// Abre el modal de confirmación de borrado para un proyecto.
+async function openDialog(page: Page, name: string) {
   await page.goto('/');
+  await card(page, name).getByRole('button', { name: 'Eliminar' }).click();
+  return page.getByRole('dialog');
+}
+
+test('modal de confirmación muestra el nombre del proyecto y el checkbox', async ({ page }) => {
+  const dialog = await openDialog(page, 'Blog Personal');
+
+  // Título con el nombre (no la URL) + checkbox de borrar carpeta sin marcar.
+  await expect(dialog).toContainText('Eliminar «Blog Personal»');
+  await expect(dialog.getByRole('checkbox')).not.toBeChecked();
+
+  // Cancelar cierra el modal sin borrar nada.
+  await dialog.getByRole('button', { name: 'Cancelar', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Blog Personal' })).toBeVisible();
+});
 
-  await card(page, 'Blog Personal').getByRole('button', { name: 'Eliminar' }).click();
+test('eliminar: consola con ventana de gracia y luego desaparece de la lista', async ({ page }) => {
+  const dialog = await openDialog(page, 'Blog Personal');
+  await dialog.getByRole('button', { name: 'Eliminar', exact: true }).click();
 
-  // Aparecieron las dos confirmaciones (datos + carpeta) y el proyecto se fue.
-  await expect.poll(() => dialogs.length).toBe(2);
-  expect(dialogs[0]).toContain('todos los datos');
-  expect(dialogs[1]).toContain('carpeta');
+  // Consola: mensaje de preparación + botón para cancelar el borrado.
+  await expect(page.getByText('Preparando proceso de eliminación…')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cancelar borrado' })).toBeVisible();
+
+  // Tras la gracia procede; aparece el ✓ y se habilita Cerrar; el botón de
+  // cancelar desaparece.
+  await expect(page.getByText(/Proyecto eliminado/)).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole('button', { name: 'Cancelar borrado' })).toHaveCount(0);
+
+  const cerrar = page.getByRole('button', { name: 'Cerrar' });
+  await expect(cerrar).toBeEnabled();
+  await cerrar.click();
+
   await expect(page.getByRole('link', { name: 'Blog Personal' })).toHaveCount(0);
 });
 
-test('conservar carpeta: cancelar la 2ª confirmación igual desconecta el proyecto', async ({
-  page
-}) => {
-  let count = 0;
-  page.on('dialog', (d) => {
-    count += 1;
-    // 1ª (borrar datos) → aceptar; 2ª (borrar carpeta) → cancelar = conservarla.
-    if (count === 1) d.accept();
-    else d.dismiss();
-  });
+test('cancelar borrado durante la gracia no borra nada', async ({ page }) => {
+  const dialog = await openDialog(page, 'Blog Personal');
+  await dialog.getByRole('button', { name: 'Eliminar', exact: true }).click();
 
-  await page.goto('/');
+  // Aborta dentro de la ventana de gracia.
+  await page.getByRole('button', { name: 'Cancelar borrado' }).click();
+  await expect(page.getByText(/Borrado cancelado/)).toBeVisible({ timeout: 15000 });
+
+  // Cerrar la consola: el proyecto sigue en la lista.
+  await page.getByRole('button', { name: 'Cerrar' }).click();
   await expect(page.getByRole('link', { name: 'Blog Personal' })).toBeVisible();
-
-  await card(page, 'Blog Personal').getByRole('button', { name: 'Eliminar' }).click();
-
-  // El panel lo olvida (desconecta) aunque se conserve la carpeta.
-  await expect(page.getByRole('link', { name: 'Blog Personal' })).toHaveCount(0);
 });
 
-test('cancelar la 1ª confirmación no borra nada', async ({ page }) => {
-  page.on('dialog', (d) => d.dismiss());
+test('marcar el checkbox borra también la carpeta', async ({ page }) => {
+  const dialog = await openDialog(page, 'Blog Personal');
+  await dialog.getByRole('checkbox').check();
+  await dialog.getByRole('button', { name: 'Eliminar', exact: true }).click();
 
-  await page.goto('/');
-  await expect(page.getByRole('link', { name: 'Blog Personal' })).toBeVisible();
-
-  await card(page, 'Blog Personal').getByRole('button', { name: 'Eliminar' }).click();
-
-  // Sigue ahí.
-  await expect(page.getByRole('link', { name: 'Blog Personal' })).toBeVisible();
+  await expect(page.getByText(/datos y carpeta borrados/)).toBeVisible({ timeout: 15000 });
+  await page.getByRole('button', { name: 'Cerrar' }).click();
+  await expect(page.getByRole('link', { name: 'Blog Personal' })).toHaveCount(0);
 });

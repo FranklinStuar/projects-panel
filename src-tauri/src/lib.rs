@@ -156,7 +156,8 @@ async fn migrate_site(app: AppHandle, id: String) -> CmdResult<migrate::Migratio
 ///
 /// Pensado también para cancelar una importación con el proyecto equivocado.
 #[tauri::command]
-async fn delete_site(id: String, delete_folder: bool) -> CmdResult<()> {
+async fn delete_site(app: AppHandle, id: String, delete_folder: bool) -> CmdResult<()> {
+    use crate::progress::log;
     let all = config::load_all_sites().map_err(e)?;
     let site = all
         .iter()
@@ -166,12 +167,20 @@ async fn delete_site(id: String, delete_folder: bool) -> CmdResult<()> {
     let docker = DockerManager::connect().map_err(e)?;
     // Apaga + exporta dump fresco a app/sql + quita vhost + teardown de
     // compartidos (no-op si está pendiente).
+    log(&app, "Apagando el proyecto y quitando su vhost…");
     docker.stop_site(&site, &all).await.ok();
     // Asegura que no quede el container php creado.
     docker.remove_container(&site.container_name()).await.ok();
     // Borra la base de datos del servidor compartido (datos del proyecto). Hay
     // que levantar el container de DB para ejecutar el DROP; luego se vuelve a
     // apagar si ningún otro proyecto activo lo usa.
+    log(
+        &app,
+        format!(
+            "Borrando la base de datos «{}» del servidor compartido…",
+            site.services.db.db_name
+        ),
+    );
     if let Ok(db_container) = docker.ensure_db(&site.services.db).await {
         wordpress::drop_database(&docker, &db_container, &site).await.ok();
     }
@@ -179,11 +188,16 @@ async fn delete_site(id: String, delete_folder: bool) -> CmdResult<()> {
 
     if delete_folder {
         // Borra la carpeta del proyecto entera.
+        log(&app, "Borrando la carpeta del proyecto del disco…");
         std::fs::remove_dir_all(&site.path).map_err(e)?;
     } else {
         // Desconecta: el panel reconstruye su registro escaneando los
         // `config.json`; quitarlo basta para que olvide el proyecto sin tocar
         // los archivos del sitio.
+        log(
+            &app,
+            "Desconectando el proyecto del panel (se conserva la carpeta)…",
+        );
         let cfg = std::path::Path::new(&site.path).join("config.json");
         std::fs::remove_file(&cfg).map_err(e)?;
     }

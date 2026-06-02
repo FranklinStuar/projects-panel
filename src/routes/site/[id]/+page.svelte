@@ -6,6 +6,7 @@
   import { api } from '$lib/api';
   import type { SiteState, GhStatus, Endpoint } from '$lib/types';
   import OpConsole from '$lib/components/OpConsole.svelte';
+  import DeleteProjectModal from '$lib/components/DeleteProjectModal.svelte';
 
   let site = $state<SiteState | null>(null);
   let endpoint = $state<Endpoint | null>(null);
@@ -84,32 +85,8 @@
     }
   }
 
-  // Borra el proyecto: siempre elimina los datos (base de datos + containers) y
-  // pregunta si borrar también la carpeta del disco. Si se conserva, el panel la
-  // olvida (desconecta) pero los archivos quedan para reconfigurar luego.
-  async function deleteProject() {
-    if (!site) return;
-    if (
-      !confirm(
-        `Eliminar "${site.config.name}"?\n\nSe borrarán todos los datos del proyecto (base de datos y containers). Esta acción no se puede deshacer.`
-      )
-    )
-      return;
-    const deleteFolder = confirm(
-      `¿Borrar también la carpeta del proyecto en disco?\n${site.config.path}\n\n` +
-        `Aceptar: borrar la carpeta (no queda nada).\n` +
-        `Cancelar: conservarla — el panel la desconecta, pero los archivos quedan para reconfigurarla más tarde.`
-    );
-    busy = true;
-    error = null;
-    try {
-      await api.deleteSite(id, deleteFolder);
-      await goto('/');
-    } catch (e) {
-      error = String(e);
-      busy = false;
-    }
-  }
+  // Proyecto en proceso de borrado (abre el modal de confirmación + consola).
+  let deleteTarget = $state<SiteState | null>(null);
 
   async function act(fn: () => Promise<unknown>) {
     error = null;
@@ -339,7 +316,7 @@
           class="rounded px-3 py-1.5 text-sm font-medium text-zinc-400 hover:text-red-500 disabled:opacity-50"
           disabled={busy}
           title="Eliminar proyecto"
-          onclick={deleteProject}
+          onclick={() => (deleteTarget = site)}
         >
           Eliminar
         </button>
@@ -606,3 +583,5 @@
 {/if}
 
 <OpConsole open={consoleOpen} running={migrating} title="Migración" onClose={() => (consoleOpen = false)} />
+
+<DeleteProjectModal bind:site={deleteTarget} onClose={(deleted) => deleted && goto('/')} />
