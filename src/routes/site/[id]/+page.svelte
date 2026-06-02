@@ -16,7 +16,7 @@
   let consoleOpen = $state(false);
   let migrating = $state(false);
 
-  const id = page.params.id;
+  const id = page.params.id as string;
 
   // Etiqueta de host con puerto solo si el panel publica en uno alterno.
   function hostLabel(s: SiteState): string {
@@ -172,6 +172,23 @@
   $effect(() => {
     if (tab === 'ext') loadExt();
   });
+
+  // Reinyecta el mu-plugin de auto-login (proyectos importados de LocalWP no lo
+  // traen, así que su admin no auto-loguea como los creados en el panel).
+  let repairing = $state(false);
+  async function repairAutologin() {
+    if (!site) return;
+    repairing = true;
+    error = null;
+    try {
+      await api.repairAutologin(id);
+      await load();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      repairing = false;
+    }
+  }
 
   // --- GitHub ---------------------------------------------------------------
   let gh = $state<GhStatus | null>(null);
@@ -364,6 +381,19 @@
       <pre class="h-96 overflow-auto rounded bg-zinc-900 p-3 text-xs leading-relaxed text-zinc-100">{logLines.join('') || 'Esperando logs…'}</pre>
     {/if}
   {:else if tab === 'ext'}
+    <!-- Auto-login: reinyectar el mu-plugin si falta (típico tras importar de LocalWP) -->
+    <div class="mb-4 flex flex-wrap items-center justify-between gap-2 rounded border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+      <span class="text-zinc-500">
+        ¿No inicia sesión sola en el admin? Reinyecta el plugin de auto-login del panel.
+      </span>
+      <button
+        class="rounded bg-zinc-200 px-3 py-1.5 font-medium disabled:opacity-50 dark:bg-zinc-800"
+        disabled={repairing}
+        onclick={repairAutologin}
+      >
+        {repairing ? '…' : 'Reparar auto-login'}
+      </button>
+    </div>
     {#if site.status !== 'running'}
       <p class="text-sm text-zinc-500">Enciende el proyecto para listar plugins y themes.</p>
     {:else if extLoading}

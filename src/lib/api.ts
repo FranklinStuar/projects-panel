@@ -32,6 +32,7 @@ export const api = {
   listLocalwpSites: () => invoke<LocalSite[]>('list_localwp_sites'),
   importLocalwpSite: (id: string) => invoke<ImportResult>('import_localwp_site', { id }),
   openAdmin: (id: string) => invoke<void>('open_admin', { id }),
+  repairAutologin: (id: string) => invoke<SiteConfig>('repair_autologin', { id }),
   openSite: (id: string) => invoke<void>('open_site', { id }),
   openFolder: (id: string) => invoke<void>('open_folder', { id }),
   streamLogs: (id: string) => invoke<void>('stream_logs', { id }),

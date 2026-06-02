@@ -61,6 +61,13 @@ async fn run_migration<R: Runtime>(
     }
     log(app, "  Carpeta del proyecto verificada.");
 
+    // mu-plugins del panel (mailpit + auto-login): un import de LocalWP no los
+    // trae y una copia de otro sistema puede traerlos desfasados. (Re)inyectarlos
+    // garantiza que el auto-login al admin funcione igual que en un proyecto
+    // creado en el panel.
+    crate::wordpress::sync_mu_plugins(site)?;
+    log(app, "  Plugins del panel (mailpit, auto-login) sincronizados.");
+
     // 1. DB compartida on-demand + base de datos vacía del proyecto (idempotente).
     log(
         app,

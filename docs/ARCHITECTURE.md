@@ -95,10 +95,10 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `progress.rs` | `log(app, msg)`: emite líneas de progreso en el evento `op-log` para operaciones largas (migración, import); el frontend las muestra en `OpConsole.svelte`. `log_progress(app, msg)`: línea "viva" (prefijo SOH) que `OpConsole` reescribe en sitio en vez de apilar (contadores/barras). |
 | `system.rs` | `status()`: estado de prerequisitos para la pantalla de configuración (Docker, red `panel-net`, dnsmasq, CA mkcert, wrappers WP-CLI, plasmoid) + endpoint y rutas. |
 | `netcheck.rs` | Lee `/proc/net/tcp{,6}` para clasificar puertos del host: `Free`/`Wildcard`/`Specific(IPs)`. Selectores `pick_loopback_ip`/`pick_alt_port` y `holder_name` (proceso que ocupa un puerto). Base de la selección de endpoint de `docker.rs`. |
-| `wordpress.rs` | `create_site` end-to-end, `download_core` (tarball), `fetch_versions` (API wp.org, cache 24h), DB/wp-config/install vía WP-CLI, mu-plugin mailpit. |
+| `wordpress.rs` | `create_site` end-to-end, `download_core` (tarball), `fetch_versions` (API wp.org, cache 24h), DB/wp-config/install vía WP-CLI. `sync_mu_plugins`: (re)inyecta los mu-plugins del panel (mailpit siempre + auto-login si `oneClickAdmin`); idempotente, lo usan `create_site`, `migrate` y `repair_autologin`. |
 | `wpcli.rs` | `run()` WP-CLI dentro del container del proyecto, como `www-data` (WP-CLI rechaza root). |
 | `logs.rs` | `spawn_stream`: sigue (`follow`) los logs del container y los emite como evento `log:{id}`. Cancelable vía `JoinHandle::abort()`. |
-| `autologin.rs` | `open_admin`: token efímero (transient WP, 60s, un solo uso) + abre navegador; el mu-plugin `panel-autologin.php` valida y loguea al admin. |
+| `autologin.rs` | `open_admin`: token efímero (transient WP, 60s, un solo uso) + abre navegador; el mu-plugin `panel-autologin.php` valida y loguea al admin. El mu-plugin lo inyecta `wordpress::sync_mu_plugins` al crear/migrar; `repair_autologin` lo reinyecta en proyectos viejos (import LocalWP) que no lo traían. |
 | `github.rs` | `gh`/`git` en el HOST (no container, los archivos están bind-montados): `status`, `clone`, `pull`, `remove_dir`, `propose_path`. Sin auth propia. |
 | `ssl.rs` | `generate`: cert/key por dominio con mkcert en `ssl/` del proyecto. La CA local (`mkcert -install`) se hace una vez en `first-run.sh`. |
 | `dbus.rs` | Servidor D-Bus (zbus) para el plasmoid KDE; arranca en el `setup` de Tauri. Ver sección D-Bus. |
@@ -133,6 +133,7 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `list_localwp_sites` | — | `Vec<LocalSite>` | Sitios de LocalWP candidatos a importar. |
 | `import_localwp_site` | `id` | `ImportResult` | Importa un sitio de LocalWP (queda `migrationPending`). |
 | `open_admin` | `id` | `()` | Abre el admin en el navegador (auto-login si está activo). |
+| `repair_autologin` | `id` | `SiteConfig` | Activa `oneClickAdmin` y reinyecta los mu-plugins del panel (auto-login + mailpit). Para proyectos importados de LocalWP sin el plugin. No requiere proyecto encendido. |
 | `stream_logs` | `id` | `()` | Inicia el stream de logs → eventos `log:{id}`. |
 | `stop_logs` | `id` | `()` | Detiene el stream de logs. |
 | `list_plugins` | `id` | `String` (JSON) | `wp plugin list`. |
