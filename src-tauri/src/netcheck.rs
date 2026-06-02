@@ -112,6 +112,7 @@ pub fn port_status(port: u16) -> PortStatus {
 
 /// Primera IP loopback `127.0.0.x` (x ≥ 2) libre en AMBOS puertos. Solo tiene
 /// sentido cuando ningún puerto está en estado wildcard.
+#[allow(dead_code)] // el panel cede 80/443 a LocalWP y usa puertos alt (ver autoselect_endpoint)
 pub fn pick_loopback_ip(http: u16, https: u16) -> Option<Ipv4Addr> {
     let sh = port_status(http);
     let ss = port_status(https);

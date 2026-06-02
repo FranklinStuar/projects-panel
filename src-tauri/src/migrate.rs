@@ -10,11 +10,14 @@ use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Runtime};
 
 use crate::config::{write_site_config, SiteConfig};
 use crate::docker::DockerManager;
-use crate::progress::log;
+use crate::progress::{log, log_progress};
 
 /// Resultado de migrar: la config actualizada + un aviso opcional para la UI
 /// (p. ej. "no había dump").
@@ -114,7 +117,7 @@ async fn run_migration<R: Runtime>(
                 app,
                 format!("[5/6] Importando la base de datos ({name}, {mb} MB), espera…"),
             );
-            import_dump(docker, site, &db_container, &dump).await?;
+            import_dump(app, docker, site, &db_container, &dump).await?;
             log(app, "      ✓ Dump importado.");
             // El dump pudo venir con otro dominio (p. ej. LocalWP `.local`):
             // fijar home/siteurl al dominio del panel para que el admin funcione.
@@ -201,20 +204,51 @@ async fn fix_site_url(docker: &DockerManager, site: &SiteConfig) -> Result<()> {
 /// bollard", como ya lo es `docker build` de la imagen php): el `exec_stdin` de
 /// bollard se cuelga con dumps grandes —su stream de salida no emite `None` al
 /// terminar un exec con stdin adjunto—, mientras que el CLI importa 7&nbsp;MB en
-/// ~15&nbsp;s. `wait_with_output` drena stdout/stderr a la vez que escribimos el
-/// dump por stdin, evitando el deadlock clásico de pipes.
-async fn import_dump(
-    _docker: &DockerManager,
+/// ~15&nbsp;s.
+///
+/// El import puede colgarse (mysql deja de leer stdin, o el exec no termina). Para
+/// que no se quede bloqueado para siempre:
+/// - lo aceleramos con pragmas de sesión ([`IMPORT_PREAMBLE`]): desactivar
+///   `foreign_key_checks`/`unique_checks` y agrupar en una sola transacción
+///   (`autocommit=0` + `COMMIT` final) evita un fsync y la revalidación de índices
+///   por statement, que es la causa real de que un dump de decenas de MB tarde
+///   minutos;
+/// - emitimos un contador en vivo (MB enviados, MB ya en la DB y segundos
+///   transcurridos) por `op-log`, para que la UI no parezca congelada;
+/// - un watchdog cancela el `docker exec` si NI el stdin avanza NI crece la DB
+///   durante [`IMPORT_IDLE_TIMEOUT`]. Ojo: medir solo bytes-por-stdin daba falsos
+///   positivos —el pipe del OS es de ~64&nbsp;KB, así que tras el primer chunk
+///   `write_all` se bloquea hasta que mysql consume stdin, y mysql lo consume tan
+///   rápido como APLICA el SQL; durante un statement grande no fluye ni un byte
+///   aunque el import avance—. Por eso el indicador de vida es el tamaño real de
+///   la DB (sondeo a `information_schema`), no el stdin.
+/// Al cancelar, recreamos la DB vacía ([`reset_database`]) para no dejar un dump
+/// aplicado a medias (corrupto). Reintentar reanuda: los pasos previos son
+/// idempotentes y la DB queda limpia, así que el import vuelve a empezar de cero.
+const IMPORT_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
+const IMPORT_CHUNK: usize = 1 << 20; // 1 MiB por escritura → progreso fino
+const IMPORT_TICK: Duration = Duration::from_secs(2);
+/// Pragmas antepuestos al dump para acelerar la aplicación (ver doc de arriba).
+const IMPORT_PREAMBLE: &[u8] =
+    b"SET autocommit=0;\nSET unique_checks=0;\nSET foreign_key_checks=0;\n";
+const IMPORT_EPILOGUE: &[u8] = b"\nCOMMIT;\n";
+
+async fn import_dump<R: Runtime>(
+    app: &AppHandle<R>,
+    docker: &DockerManager,
     site: &SiteConfig,
     db_container: &str,
     dump: &Path,
 ) -> Result<()> {
     use std::process::Stdio;
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::process::Command;
 
-    let bytes = std::fs::read(dump)
-        .with_context(|| format!("leyendo el dump {:?}", dump))?;
+    let bytes = Arc::new(
+        std::fs::read(dump).with_context(|| format!("leyendo el dump {:?}", dump))?,
+    );
+    let total = bytes.len() as u64;
+    let total_mb = total / 1_048_576;
     let dbname = site.services.db.db_name.clone();
 
     let mut child = Command::new("docker")
@@ -225,26 +259,180 @@ async fn import_dump(
         .spawn()
         .context("lanzando `docker exec` para importar el dump")?;
 
-    // Escribir el dump por stdin en una tarea aparte mientras `wait_with_output`
-    // drena stdout/stderr: si volcáramos todo sin leer, el pipe se llenaría y se
-    // colgaría.
     let mut stdin = child.stdin.take().expect("stdin piped");
-    let writer = tokio::spawn(async move {
-        stdin.write_all(&bytes).await.ok();
-        stdin.shutdown().await.ok(); // EOF → mysql termina
+    let mut stdout = child.stdout.take().expect("stdout piped");
+    let mut stderr = child.stderr.take().expect("stderr piped");
+
+    let start = Instant::now();
+    // Marca de la última actividad de escritura, en ms desde `start`. La actualiza
+    // el writer tras cada chunk; el watchdog la compara contra el reloj.
+    let last_activity = Arc::new(AtomicU64::new(0));
+    let written = Arc::new(AtomicU64::new(0));
+
+    // Writer: vuelca pragmas + dump por chunks, registrando avance. Si mysql deja
+    // de leer, `write_all` se bloquea; el watchdog se apoya en el crecimiento de la
+    // DB (no solo en esto) para no cancelar un import sano pero lento.
+    let writer = {
+        let bytes = Arc::clone(&bytes);
+        let last_activity = Arc::clone(&last_activity);
+        let written = Arc::clone(&written);
+        tokio::spawn(async move {
+            if stdin.write_all(IMPORT_PREAMBLE).await.is_err() {
+                return;
+            }
+            for chunk in bytes.chunks(IMPORT_CHUNK) {
+                if stdin.write_all(chunk).await.is_err() {
+                    return; // el exec murió (p. ej. lo mató el watchdog)
+                }
+                written.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+                last_activity.store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+            }
+            stdin.write_all(IMPORT_EPILOGUE).await.ok(); // COMMIT de la transacción
+            stdin.shutdown().await.ok(); // EOF → mysql termina
+            // Tras EOF, reiniciar el reloj de inactividad: dale margen a mysql para
+            // aplicar/commitear lo último sin que el watchdog lo mate.
+            last_activity.store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+        })
+    };
+
+    // Drenar stdout/stderr para que el pipe no se llene y bloquee el proceso.
+    let out_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        stdout.read_to_end(&mut buf).await.ok();
+        buf
+    });
+    let err_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        stderr.read_to_end(&mut buf).await.ok();
+        buf
     });
 
-    let output = child
-        .wait_with_output()
-        .await
-        .context("esperando a `docker exec` (import)")?;
-    writer.await.ok();
+    // Watchdog + contador en vivo. Solo resuelve si se supera la inactividad; si
+    // no, corre indefinidamente hasta que `child.wait()` gane el select. El
+    // indicador de vida es el tamaño real de la DB (sondeo a `information_schema`):
+    // crece mientras mysql aplica, aunque el stdin esté bloqueado.
+    let db_size_sql = format!(
+        "SELECT COALESCE(SUM(data_length+index_length),0) \
+         FROM information_schema.tables WHERE table_schema='{dbname}'"
+    );
+    let watchdog = {
+        let last_activity = Arc::clone(&last_activity);
+        let written = Arc::clone(&written);
+        async move {
+            let mut ticker = tokio::time::interval(IMPORT_TICK);
+            ticker.tick().await; // dispara de inmediato; descartar
+            let mut max_db_bytes = 0u64;
+            loop {
+                ticker.tick().await;
+                let now_ms = start.elapsed().as_millis() as u64;
 
-    if !output.status.success() {
+                // Tamaño de la DB ahora; si creció, cuenta como actividad.
+                let db_bytes = query_db_size(docker, db_container, &db_size_sql).await;
+                if db_bytes > max_db_bytes {
+                    max_db_bytes = db_bytes;
+                    last_activity.store(now_ms, Ordering::Relaxed);
+                }
+
+                let sent = written.load(Ordering::Relaxed);
+                let sent_mb = sent / 1_048_576;
+                let secs = now_ms / 1000;
+                // Línea "viva" que el frontend reescribe en sitio (no apila): barra
+                // por bytes enviados + reloj. `max_db_bytes` solo alimenta el
+                // watchdog, no se muestra (mantener la línea corta).
+                log_progress(
+                    app,
+                    format!(
+                        "      {sent_mb}/{total_mb} MB {} {}:{:02}",
+                        progress_bar(sent, total, 24),
+                        secs / 60,
+                        secs % 60
+                    ),
+                );
+                let idle_ms = now_ms.saturating_sub(last_activity.load(Ordering::Relaxed));
+                if idle_ms >= IMPORT_IDLE_TIMEOUT.as_millis() as u64 {
+                    return; // colgado: ni stdin avanza ni crece la DB
+                }
+            }
+        }
+    };
+
+    let timed_out = tokio::select! {
+        status = child.wait() => {
+            let status = status.context("esperando a `docker exec` (import)")?;
+            if !status.success() {
+                writer.await.ok();
+                let err = err_task.await.unwrap_or_default();
+                out_task.abort();
+                return Err(anyhow!(
+                    "import del dump falló en {db_container}: {}",
+                    String::from_utf8_lossy(&err).trim()
+                ));
+            }
+            false
+        }
+        _ = watchdog => true,
+    };
+
+    if timed_out {
+        let mins = IMPORT_IDLE_TIMEOUT.as_secs() / 60;
+        log(
+            app,
+            format!("      ✗ Import sin avance por {mins} min: cancelando y restaurando la DB…"),
+        );
+        child.start_kill().ok();
+        child.wait().await.ok();
+        writer.abort();
+        out_task.abort();
+        err_task.abort();
+        // Revertir: dejar la DB vacía para que un reintento importe desde cero.
+        crate::wordpress::reset_database(docker, db_container, site)
+            .await
+            .context("restaurando la DB tras cancelar el import")?;
+        log(app, "      ✓ DB restaurada (vacía).");
         return Err(anyhow!(
-            "import del dump falló en {db_container}: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
+            "import cancelado: sin actividad por {mins} min. La DB se restauró \
+             vacía; reintenta la migración para importar de nuevo."
         ));
     }
+
+    writer.await.ok();
+    out_task.abort();
+    err_task.abort();
     Ok(())
+}
+
+/// Barra de progreso textual: `filled` de `width` caracteres según `done/total`.
+/// Llena con `━`, resto `─` (p. ej. `━━━━━──────`).
+fn progress_bar(done: u64, total: u64, width: usize) -> String {
+    let filled = if total == 0 {
+        0
+    } else {
+        (done.min(total) as u128 * width as u128 / total as u128) as usize
+    };
+    let mut s = String::with_capacity(width * 3);
+    s.extend(std::iter::repeat('━').take(filled));
+    s.extend(std::iter::repeat('─').take(width - filled));
+    s
+}
+
+/// Tamaño actual de la DB (bytes) según `information_schema`. Indicador de vida
+/// del import: si crece, mysql sigue aplicando. Best-effort: ante cualquier fallo
+/// devuelve 0 (no se trata como progreso, pero tampoco rompe). El cliente `mysql`
+/// avisa por stderr al pasar la contraseña en CLI y `exec` mezcla stdout+stderr,
+/// así que buscamos la línea que sea un entero, no el primer renglón.
+async fn query_db_size(docker: &DockerManager, db_container: &str, sql: &str) -> u64 {
+    let out = match docker
+        .exec(
+            db_container,
+            vec!["mysql", "-uroot", "-ppanel", "-N", "-B", "-e", sql],
+        )
+        .await
+    {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    out.lines()
+        .filter_map(|l| l.trim().parse::<u64>().ok())
+        .next_back()
+        .unwrap_or(0)
 }

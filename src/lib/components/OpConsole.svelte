@@ -12,7 +12,13 @@
     onClose
   }: { open?: boolean; title?: string; running?: boolean; onClose?: () => void } = $props();
 
+  // Carácter (SOH) con que el backend marca una línea de progreso "viva": la
+  // reescribimos en sitio en vez de apilarla, así un contador que tickea cada 2s
+  // (import) no inunda la consola. Espejo de `PROGRESS_PREFIX` en progress.rs.
+  const PROGRESS_PREFIX = '\u0001';
+
   let lines = $state<string[]>([]);
+  let lastIsProgress = false; // ¿la última línea es una línea viva reemplazable?
   let un: UnlistenFn | null = null;
   let wasOpen = false;
 
@@ -23,13 +29,27 @@
   // la consola; si esperáramos a `open` se perderían las primeras líneas.
   onMount(() => {
     listen<string>('op-log', (e) => {
-      lines = [...lines.slice(-300), e.payload];
+      const payload = e.payload;
+      if (payload.startsWith(PROGRESS_PREFIX)) {
+        // Línea viva: reemplaza la anterior viva en sitio; si no, apila una nueva.
+        const text = payload.slice(PROGRESS_PREFIX.length);
+        lines = lastIsProgress
+          ? [...lines.slice(0, -1), text]
+          : [...lines.slice(-300), text];
+        lastIsProgress = true;
+      } else {
+        lines = [...lines.slice(-300), payload];
+        lastIsProgress = false;
+      }
     }).then((u) => (un = u));
   });
 
   // Limpia el buffer al inicio de cada operación (transición cerrado→abierto).
   $effect(() => {
-    if (open && !wasOpen) lines = [];
+    if (open && !wasOpen) {
+      lines = [];
+      lastIsProgress = false;
+    }
     wasOpen = open;
   });
 

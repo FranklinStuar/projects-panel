@@ -395,9 +395,17 @@ impl DockerManager {
             return Ok(());
         }
 
-        let ep = Self::select_endpoint()?;
+        let mut ep = Self::select_endpoint()?;
         Self::ensure_endpoint_dns(&ep)?;
-        Self::preflight_endpoint(&ep)?;
+        // El endpoint persistido puede haber quedado inservible (p. ej. LocalWP
+        // tomó el puerto mientras el panel estaba apagado). Si ya no es bindeable,
+        // re-elegimos y re-persistimos en vez de fallar con "puerto ocupado".
+        if Self::preflight_endpoint(&ep).is_err() {
+            ep = Self::autoselect_endpoint();
+            crate::config::save_endpoint(&ep)?;
+            Self::ensure_endpoint_dns(&ep)?;
+            Self::preflight_endpoint(&ep)?;
+        }
 
         self.ensure_image("nginx:alpine").await?;
 
@@ -485,32 +493,12 @@ impl DockerManager {
         Ok(ep)
     }
 
-    /// Elige endpoint libre por capas:
-    /// 1. `127.0.0.1:80/443` si está libre.
-    /// 2. Conflicto por IP concreta → otra IP loopback en 80/443 (URLs limpias).
-    /// 3. Conflicto wildcard (LocalWP) o sin loopback → `127.0.0.1` + puertos alt.
+    /// Cede 80/443 a LocalWP: el panel SIEMPRE publica en puertos altos para
+    /// coexistir sin choques (las URLs del panel llevan el puerto, p. ej. :8443).
+    /// Elige el primer par libre desde 8080/8443.
     fn autoselect_endpoint() -> crate::config::Endpoint {
         use crate::config::Endpoint;
         use crate::netcheck;
-        use std::net::Ipv4Addr;
-
-        let lo = Ipv4Addr::new(127, 0, 0, 1);
-        let http = netcheck::port_status(80);
-        let https = netcheck::port_status(443);
-
-        if http.free_for(lo) && https.free_for(lo) {
-            return Endpoint::default();
-        }
-
-        if !http.is_wildcard() && !https.is_wildcard() {
-            if let Some(ip) = netcheck::pick_loopback_ip(80, 443) {
-                return Endpoint {
-                    loopback_ip: ip.to_string(),
-                    http_port: 80,
-                    https_port: 443,
-                };
-            }
-        }
 
         let hp = netcheck::pick_alt_port(8080).unwrap_or(8080);
         let mut sp = netcheck::pick_alt_port(8443).unwrap_or(8443);

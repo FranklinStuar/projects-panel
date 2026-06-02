@@ -188,6 +188,33 @@ async fn open_admin(app: AppHandle, id: String) -> CmdResult<()> {
     autologin::open_admin(&app, &docker, &site).await.map_err(e)
 }
 
+/// Abre la web pública del proyecto (home, sin auto-login) en el navegador.
+#[tauri::command]
+async fn open_site(app: AppHandle, id: String) -> CmdResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let site = config::find_site(&id)
+        .map_err(e)?
+        .ok_or_else(|| format!("proyecto {id} no encontrado"))?;
+    let docker = DockerManager::connect().map_err(e)?;
+    if !docker.is_running(&site.container_name()).await {
+        return Err(format!("el proyecto '{}' no está encendido", site.name));
+    }
+    let url = config::endpoint_or_default().site_url(&site.domain, site.services.nginx.ssl);
+    app.opener().open_url(url, None::<&str>).map_err(e)
+}
+
+/// Abre la carpeta del proyecto en el explorador de archivos.
+#[tauri::command]
+async fn open_folder(app: AppHandle, id: String) -> CmdResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let site = config::find_site(&id)
+        .map_err(e)?
+        .ok_or_else(|| format!("proyecto {id} no encontrado"))?;
+    app.opener()
+        .open_path(site.path.clone(), None::<&str>)
+        .map_err(e)
+}
+
 /// Empieza a emitir eventos `log:{id}` con los logs del container del proyecto.
 #[tauri::command]
 async fn stream_logs(app: AppHandle, state: State<'_, LogStreams>, id: String) -> CmdResult<()> {
@@ -467,6 +494,8 @@ pub fn run() {
             list_localwp_sites,
             import_localwp_site,
             open_admin,
+            open_site,
+            open_folder,
             stream_logs,
             stop_logs,
             list_plugins,

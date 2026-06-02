@@ -303,6 +303,35 @@ eventos. Los tests e2e usan IPC mockeado (no Tauri real), así que no lo detecta
   emite una línea `✗ La migración falló: …` a la consola antes de propagarlo, para
   que el fallo se vea ahí y no solo en el banner.
 
+### Fix — import del dump: timeout con rollback, aceleración y barra de progreso
+
+Un dump grande podía quedarse "clavado" en la importación (mysql lento, o el
+`docker exec` colgado) sin forma de cancelar ni señal de avance, dejando además
+la DB a medio importar (corrupta) si se mataba la app. Tres cambios en
+`migrate::import_dump`:
+
+- **Aceleración (causa real de la lentitud)**: se anteponen pragmas de sesión al
+  stream (`SET foreign_key_checks=0; unique_checks=0; autocommit=0; … COMMIT;`).
+  Evita el fsync y la revalidación de índices/FK por statement, que es lo que hace
+  que decenas de MB tarden minutos.
+- **Watchdog con rollback + resume**: el dump se escribe por chunks y un watchdog
+  cancela el `docker exec` si **ni el stdin avanza ni crece la DB** durante 3 min
+  (`IMPORT_IDLE_TIMEOUT`). Al cancelar, `wordpress::reset_database` (nuevo) hace
+  `DROP DATABASE` + recrea vacía, para no dejar un dump aplicado a medias.
+  Reintentar la migración **reanuda**: los pasos 1–4 son idempotentes y la DB
+  queda limpia, así que el import vuelve a empezar de cero (única forma segura: no
+  se puede retomar un dump SQL a mitad de statement).
+- **Indicador de vida correcto**: medir solo bytes-por-stdin daba falsos timeouts
+  —el pipe del OS es de ~64&nbsp;KB; tras el primer chunk `write_all` se bloquea
+  hasta que mysql consume stdin, y mysql lo consume tan rápido como **aplica** el
+  SQL, así que durante un statement grande no fluye ni un byte aunque el import
+  avance—. El watchdog usa además el **tamaño real de la DB** (`information_schema`,
+  vía `query_db_size`).
+- **Barra de progreso en sitio**: `progress::log_progress` (nuevo) marca líneas
+  "vivas" con un prefijo SOH (`PROGRESS_PREFIX = '\u0001'`); `OpConsole.svelte` las
+  **reescribe en sitio** en vez de apilarlas, así un contador que tickea cada 2&nbsp;s
+  no inunda la consola. El import muestra `12/53 MB ━━━━━──── 1:23` actualizándose.
+
 **Fase 4 completa.** Falta solo Fase 5 (asistente IA, `agent.rs`).
 
 ## Testing — dos vías (ver `docs/TESTING.md`)

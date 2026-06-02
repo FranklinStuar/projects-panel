@@ -103,6 +103,24 @@
     }
   }
 
+  async function openSite() {
+    error = null;
+    try {
+      await api.openSite(id);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function openFolder() {
+    error = null;
+    try {
+      await api.openFolder(id);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   // --- Logs en vivo ---------------------------------------------------------
   let logLines = $state<string[]>([]);
   let unlisten: UnlistenFn | null = null;
@@ -249,10 +267,19 @@
         </button>
       {:else}
         {#if site.status === 'running'}
+          <button class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500" onclick={openSite}>
+            Abrir web
+          </button>
           <button class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500" onclick={openAdmin}>
             Abrir admin
           </button>
         {/if}
+        <button
+          class="rounded bg-zinc-200 px-3 py-1.5 text-sm font-medium dark:bg-zinc-800"
+          onclick={openFolder}
+        >
+          Abrir carpeta
+        </button>
         <button
           class="rounded px-3 py-1.5 text-sm font-medium"
           class:bg-green-600={site.status !== 'running'}
