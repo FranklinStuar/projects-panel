@@ -146,10 +146,18 @@ async fn migrate_site(app: AppHandle, id: String) -> CmdResult<migrate::Migratio
 }
 
 /// Borra un proyecto: lo apaga (si corre), quita su container y vhost, y elimina
-/// su carpeta de `~/panel-wp/`. Pensado para cancelar una importación con el
-/// proyecto equivocado (aún sin migrar), pero sirve para cualquier proyecto.
+/// la base de datos del servidor compartido («borra todos los datos»).
+///
+/// `delete_folder` decide qué pasa con la carpeta de `~/panel-wp/`:
+/// - `true`  → se borra entera (no queda nada en disco).
+/// - `false` → se conserva, pero se quita su `config.json` para que el panel la
+///   olvide (queda «desconectada»). Los archivos (app/public, conf, dumps en
+///   app/sql) siguen en disco para poder reconfigurar el proyecto más tarde.
+///
+/// Pensado también para cancelar una importación con el proyecto equivocado.
 #[tauri::command]
-async fn delete_site(id: String) -> CmdResult<()> {
+async fn delete_site(app: AppHandle, id: String, delete_folder: bool) -> CmdResult<()> {
+    use crate::progress::log;
     let all = config::load_all_sites().map_err(e)?;
     let site = all
         .iter()
@@ -157,12 +165,42 @@ async fn delete_site(id: String) -> CmdResult<()> {
         .cloned()
         .ok_or_else(|| format!("proyecto {id} no encontrado"))?;
     let docker = DockerManager::connect().map_err(e)?;
-    // Apaga + quita vhost + teardown de compartidos (no-op si está pendiente).
+    // Apaga + exporta dump fresco a app/sql + quita vhost + teardown de
+    // compartidos (no-op si está pendiente).
+    log(&app, "Apagando el proyecto y quitando su vhost…");
     docker.stop_site(&site, &all).await.ok();
     // Asegura que no quede el container php creado.
     docker.remove_container(&site.container_name()).await.ok();
-    // Borra la carpeta del proyecto (fuente de verdad).
-    std::fs::remove_dir_all(&site.path).map_err(e)?;
+    // Borra la base de datos del servidor compartido (datos del proyecto). Hay
+    // que levantar el container de DB para ejecutar el DROP; luego se vuelve a
+    // apagar si ningún otro proyecto activo lo usa.
+    log(
+        &app,
+        format!(
+            "Borrando la base de datos «{}» del servidor compartido…",
+            site.services.db.db_name
+        ),
+    );
+    if let Ok(db_container) = docker.ensure_db(&site.services.db).await {
+        wordpress::drop_database(&docker, &db_container, &site).await.ok();
+    }
+    docker.teardown_unused_shared(&site, &all).await.ok();
+
+    if delete_folder {
+        // Borra la carpeta del proyecto entera.
+        log(&app, "Borrando la carpeta del proyecto del disco…");
+        std::fs::remove_dir_all(&site.path).map_err(e)?;
+    } else {
+        // Desconecta: el panel reconstruye su registro escaneando los
+        // `config.json`; quitarlo basta para que olvide el proyecto sin tocar
+        // los archivos del sitio.
+        log(
+            &app,
+            "Desconectando el proyecto del panel (se conserva la carpeta)…",
+        );
+        let cfg = std::path::Path::new(&site.path).join("config.json");
+        std::fs::remove_file(&cfg).map_err(e)?;
+    }
     Ok(())
 }
 

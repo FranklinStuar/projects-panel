@@ -9,8 +9,19 @@
     open = false,
     title = 'Operación',
     running = false,
+    cancelable = false,
+    onCancel,
     onClose
-  }: { open?: boolean; title?: string; running?: boolean; onClose?: () => void } = $props();
+  }: {
+    open?: boolean;
+    title?: string;
+    running?: boolean;
+    // Si `cancelable`, se muestra un botón para abortar la operación en curso
+    // (p. ej. la ventana de gracia antes de borrar un proyecto).
+    cancelable?: boolean;
+    onCancel?: () => void;
+    onClose?: () => void;
+  } = $props();
 
   // Carácter (SOH) con que el backend marca una línea de progreso "viva": la
   // reescribimos en sitio en vez de apilarla, así un contador que tickea cada 2s
@@ -70,13 +81,23 @@
           {title}
           {#if running}<span class="ml-1 text-zinc-500">en curso…</span>{:else}<span class="ml-1 text-green-400">listo</span>{/if}
         </span>
-        <button
-          class="rounded bg-zinc-800 px-2 py-1 text-sm disabled:opacity-40"
-          disabled={running}
-          onclick={() => onClose?.()}
-        >
-          Cerrar
-        </button>
+        <div class="flex items-center gap-2">
+          {#if cancelable}
+            <button
+              class="rounded bg-red-600 px-2 py-1 text-sm font-medium text-white hover:bg-red-500"
+              onclick={() => onCancel?.()}
+            >
+              Cancelar borrado
+            </button>
+          {/if}
+          <button
+            class="rounded bg-zinc-800 px-2 py-1 text-sm disabled:opacity-40"
+            disabled={running}
+            onclick={() => onClose?.()}
+          >
+            Cerrar
+          </button>
+        </div>
       </div>
       <pre bind:this={box} class="m-0 flex-1 overflow-auto whitespace-pre-wrap px-4 py-2 text-xs leading-relaxed text-zinc-300">{lines.join('\n')}</pre>
     </div>

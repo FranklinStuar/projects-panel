@@ -3,6 +3,7 @@
   import { api } from '$lib/api';
   import type { SiteState, Endpoint } from '$lib/types';
   import OpConsole from '$lib/components/OpConsole.svelte';
+  import DeleteProjectModal from '$lib/components/DeleteProjectModal.svelte';
 
   let sites = $state<SiteState[]>([]);
   let endpoint = $state<Endpoint | null>(null);
@@ -70,7 +71,7 @@
     busy = { ...busy, [s.config.id]: true };
     error = null;
     try {
-      await api.deleteSite(s.config.id);
+      await api.deleteSite(s.config.id, true);
       await load();
     } catch (e) {
       error = String(e);
@@ -78,6 +79,9 @@
       busy = { ...busy, [s.config.id]: false };
     }
   }
+
+  // Proyecto en proceso de borrado (abre el modal de confirmación + consola).
+  let deleteTarget = $state<SiteState | null>(null);
 
   async function migrate(s: SiteState) {
     if (!confirm(`Migrar "${s.config.name}" a este sistema (crear DB, importar dump, regenerar SSL) y encender?`))
@@ -190,17 +194,27 @@
                 </button>
               </div>
             {:else}
-              <button
-                class="rounded px-3 py-1.5 text-sm font-medium"
-                class:bg-green-600={s.status !== 'running'}
-                class:text-white={s.status !== 'running'}
-                class:bg-zinc-200={s.status === 'running'}
-                class:dark:bg-zinc-800={s.status === 'running'}
-                disabled={busy[s.config.id]}
-                onclick={() => toggle(s)}
-              >
-                {busy[s.config.id] ? '…' : s.status === 'running' ? 'Detener' : 'Encender'}
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  class="rounded px-3 py-1.5 text-sm font-medium"
+                  class:bg-green-600={s.status !== 'running'}
+                  class:text-white={s.status !== 'running'}
+                  class:bg-zinc-200={s.status === 'running'}
+                  class:dark:bg-zinc-800={s.status === 'running'}
+                  disabled={busy[s.config.id]}
+                  onclick={() => toggle(s)}
+                >
+                  {busy[s.config.id] ? '…' : s.status === 'running' ? 'Detener' : 'Encender'}
+                </button>
+                <button
+                  class="rounded px-2 py-1.5 text-sm text-zinc-400 hover:text-red-500 disabled:opacity-50"
+                  disabled={busy[s.config.id]}
+                  title="Eliminar proyecto"
+                  onclick={() => (deleteTarget = s)}
+                >
+                  Eliminar
+                </button>
+              </div>
             {/if}
           </div>
         {/each}
@@ -210,3 +224,5 @@
 {/if}
 
 <OpConsole open={consoleOpen} running={migrating} title="Migración" onClose={() => (consoleOpen = false)} />
+
+<DeleteProjectModal bind:site={deleteTarget} onClose={(deleted) => deleted && load()} />

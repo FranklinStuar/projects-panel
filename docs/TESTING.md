@@ -121,10 +121,13 @@ NORMAL (sin mock) en el 1420, Playwright lo reutiliza y los tests fallan sin
 datos. Cierra cualquier `vite dev` previo antes de correr los e2e.
 
 Specs en `e2e/` (un escenario por archivo): `dashboard`, `migrate`,
-`cancel-import`, `settings`, `new-site`, `a11y`.
+`cancel-import`, `delete-site`, `settings`, `new-site`, `a11y`.
 
 Notas para escribir specs:
-- Los `confirm()` se aprueban con `page.on('dialog', (d) => d.accept())`.
+- Los `confirm()` se aprueban con `page.on('dialog', (d) => d.accept())`. El
+  borrado de proyecto **no** usa `confirm()` nativo sino un modal propio
+  (`role="dialog"`): scopea los botones con `page.getByRole('dialog')` para no
+  chocar con los botones homónimos de las tarjetas.
 - Usa `{ exact: true }` en nombres de rol que sean subcadena de otros
   (`Encender` casa con `Migrar y encender`; `Proyectos` con el enlace
   `← Proyectos`).

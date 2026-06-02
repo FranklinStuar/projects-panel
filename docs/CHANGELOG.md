@@ -412,6 +412,39 @@ la DB a medio importar (corrupta) si se mataba la app. Tres cambios en
 - **Fix**: añadido `--user www-data` al `docker exec` del wrapper. El refresco del
   script se aplica solo al reabrir el panel (auto-instalación idempotente).
 
+## Borrar proyecto (con opción de conservar la carpeta)
+
+Botón **"Eliminar"** en el dashboard (cada tarjeta) y en la vista de proyecto,
+para cualquier proyecto (no solo importaciones pendientes — eso ya lo cubría
+"Cancelar").
+
+- **Siempre borra todos los datos**: apaga + quita container/vhost + **`DROP
+  DATABASE`** del esquema del proyecto en el servidor de DB compartido
+  (`wordpress::drop_database`, nuevo — antes `delete_site` dejaba el esquema
+  vivo). Tras el drop, `teardown_unused_shared` re-apaga el container de DB si
+  ningún otro activo lo usa.
+- **Modal de confirmación propio** (`DeleteProjectModal.svelte`, no el `confirm()`
+  nativo que mostraba la URL de localhost como título): titula con el **nombre**
+  del proyecto y trae un **checkbox** "Borrar también la carpeta del proyecto en
+  disco" — una sola pantalla en vez de dos diálogos encadenados.
+  - **Marcado** → `remove_dir_all` de la carpeta del proyecto.
+  - **Sin marcar** → conserva la carpeta y solo elimina su `config.json`, así el
+    panel la olvida (queda "desconectada"); `app/public`, `conf` y los dumps de
+    `app/sql` siguen en disco para reconfigurarla más tarde. `stop_site` deja un
+    dump fresco antes de apagar.
+- **Consola con ventana de gracia**: al confirmar se abre la `OpConsole` (la misma
+  de migración/import) con una cuenta atrás de **5 s** ("Preparando proceso de
+  eliminación…") y un botón **«Cancelar borrado»**. Si se cancela a tiempo, no se
+  toca nada. Pasados los 5 s desaparece el botón de cancelar y se procede; al
+  terminar se habilita **«Cerrar»**. `delete_site` emite sus pasos (apagar, DROP
+  de la DB, borrar/desconectar carpeta) por el canal `op-log`.
+- **API**: `delete_site` pasa de `(id)` a `(id, deleteFolder)` (+ `AppHandle` para
+  emitir progreso); `api.deleteSite` espejo. "Cancelar importación" sigue llamando
+  con `deleteFolder=true` (borra todo, como antes).
+- **Tests**: `e2e/delete-site.spec.ts` cubre las cuatro ramas (modal + cancelar,
+  borrar solo datos, abortar en la gracia, borrar también la carpeta). Suite e2e
+  completa: 16/16.
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).
