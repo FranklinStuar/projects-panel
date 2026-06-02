@@ -384,6 +384,34 @@ la DB a medio importar (corrupta) si se mataba la app. Tres cambios en
   Botón «Reparar auto-login» en el tab *Plugins / Themes* de la página de proyecto
   (`api.repairAutologin`; mock en `src/lib/dev/mock-ipc.ts`).
 
+## Terminal WP-CLI en un clic
+
+- **Antes**: solo existía el botón «Instalar wrapper `wp`». El usuario tenía que
+  abrir su propia terminal, hacer `cd` a la carpeta del proyecto y recordar
+  ejecutar `wp`. No había forma de abrir la terminal desde el panel.
+- **`cli::open_terminal_at(path)`**: lanza el primer emulador de terminal
+  disponible (konsole, gnome-terminal, xfce4-terminal, kitty, alacritty,
+  `x-terminal-emulator`) con cwd en la carpeta del proyecto, detached.
+- **Comando `open_terminal(id)`** (`lib.rs`): instala el wrapper (idempotente) y
+  abre la terminal ya situada en el proyecto; dentro `wp <args>` funciona porque
+  el wrapper detecta el proyecto por el CWD.
+- **Auto-instalación del wrapper**: el wrapper es **global del usuario**
+  (`~/.local/bin`, no por-proyecto). `run()` lo instala una vez al arrancar
+  (idempotente, best-effort), así proyectos nuevos no necesitan ninguna acción.
+- **UI** (tab *Servicios* de la página de proyecto): botón «Abrir terminal del
+  proyecto» (requiere proyecto encendido) + texto de ayuda con ejemplos
+  (`wp plugin list`, `wp user list`) y aviso de no usar `sudo`. Se conserva «Solo
+  instalar wrapper `wp`» para reinstalar/reparar. `api.openTerminal`.
+
+## Fix — el wrapper `wp` de terminal corría como root
+
+- **Bug**: `scripts/wp-wrapper.sh` hacía `docker exec` **sin** `--user www-data`,
+  así WP-CLI arrancaba WordPress como root → bloqueo anti-root (`YIKES! …running
+  this as root`). `wp cli info` funcionaba (no bootea WP) pero `wp plugin list` no.
+  El comando in-app `exec_wpcli` sí usaba www-data; el wrapper se quedó sin paridad.
+- **Fix**: añadido `--user www-data` al `docker exec` del wrapper. El refresco del
+  script se aplica solo al reabrir el panel (auto-instalación idempotente).
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).
