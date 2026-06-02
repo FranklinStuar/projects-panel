@@ -542,11 +542,20 @@
 
     <!-- WP-CLI terminal -->
     <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Terminal WP-CLI</h3>
-    <div class="mb-4 flex items-center gap-2 text-sm">
+    <div class="mb-2 flex flex-wrap items-center gap-2 text-sm">
       <button class="rounded bg-zinc-200 px-3 py-1.5 disabled:opacity-50 dark:bg-zinc-800"
-        disabled={svcBusy} onclick={() => svcAction(() => api.installCliWrapper())}>Instalar wrapper `wp`</button>
-      <span class="text-xs text-zinc-500">Luego usa <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">wp ...</code> dentro de la carpeta del proyecto.</span>
+        disabled={svcBusy || site.status !== 'running'}
+        onclick={() => svcAction(() => api.openTerminal(id))}>Abrir terminal del proyecto</button>
+      <button class="rounded border border-zinc-300 px-3 py-1.5 disabled:opacity-50 dark:border-zinc-700"
+        disabled={svcBusy} onclick={() => svcAction(() => api.installCliWrapper())}>Solo instalar wrapper `wp`</button>
     </div>
+    <p class="mb-4 text-xs text-zinc-500">
+      Abre una terminal ya situada en la carpeta del proyecto con el wrapper
+      <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">wp</code> listo. Dentro ejecuta p. ej.
+      <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">wp plugin list</code> o
+      <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">wp user list</code> — <strong>sin <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">sudo</code></strong>
+      (corre dentro del container). El proyecto debe estar encendido.
+    </p>
 
     <!-- Stubs -->
     <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Próximamente</h3>

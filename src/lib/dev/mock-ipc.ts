@@ -165,6 +165,7 @@ export function installMockIpc() {
       case 'open_admin':
       case 'open_mailpit':
       case 'open_minio':
+      case 'open_terminal':
       case 'stream_logs':
       case 'stop_logs':
       case 'regenerate_ssl':

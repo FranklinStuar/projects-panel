@@ -7,7 +7,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn scripts_dir() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../scripts"))
@@ -57,4 +57,37 @@ pub fn install_cli_wrapper() -> Result<String> {
         ));
     }
     Ok(msg)
+}
+
+/// Lanza un emulador de terminal con el cwd en `path`. Prueba varios en orden y
+/// usa el primero que exista. El proceso queda detached (no esperamos a que
+/// cierre). El wrapper `wp` ya instalado funciona dentro porque detecta el
+/// proyecto por el directorio actual.
+pub fn open_terminal_at(path: &Path) -> Result<()> {
+    use std::process::Command;
+
+    let p = path.to_string_lossy().to_string();
+    // (binario, flag que fija el directorio de trabajo). Además fijamos
+    // `current_dir` para los que no tengan flag propio (x-terminal-emulator).
+    let attempts: [(&str, Vec<String>); 6] = [
+        ("konsole", vec!["--workdir".into(), p.clone()]),
+        ("gnome-terminal", vec![format!("--working-directory={p}")]),
+        ("xfce4-terminal", vec![format!("--working-directory={p}")]),
+        ("kitty", vec!["--directory".into(), p.clone()]),
+        ("alacritty", vec!["--working-directory".into(), p.clone()]),
+        ("x-terminal-emulator", vec![]),
+    ];
+
+    for (bin, args) in &attempts {
+        match Command::new(bin).args(args).current_dir(path).spawn() {
+            Ok(_) => return Ok(()),
+            // No instalado: probamos el siguiente candidato.
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(anyhow!("al lanzar {bin}: {err}")),
+        }
+    }
+    Err(anyhow!(
+        "no se encontró un emulador de terminal (konsole, gnome-terminal, xfce4-terminal, kitty, alacritty). Instala uno o abre tu terminal y ejecuta `wp` dentro de {}",
+        p
+    ))
 }

@@ -20,6 +20,7 @@ export const api = {
   stopSite: (id: string) => invoke<void>('stop_site', { id }),
   stopAllSites: () => invoke<void>('stop_all_sites'),
   execWpcli: (id: string, args: string[]) => invoke<string>('exec_wpcli', { id, args }),
+  openTerminal: (id: string) => invoke<void>('open_terminal', { id }),
   createSite: (req: NewSiteRequest) => invoke<SiteConfig>('create_site', { req }),
   listWpVersions: () => invoke<WpVersion[]>('list_wp_versions'),
   panelEndpoint: () => invoke<Endpoint>('panel_endpoint'),

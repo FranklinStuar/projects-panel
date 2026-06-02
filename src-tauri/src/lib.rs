@@ -229,6 +229,18 @@ async fn open_folder(app: AppHandle, id: String) -> CmdResult<()> {
         .map_err(e)
 }
 
+/// Abre una terminal del sistema en la carpeta del proyecto, con el wrapper `wp`
+/// listo (lo instala si hace falta). Dentro basta con ejecutar `wp <args>`.
+#[tauri::command]
+async fn open_terminal(id: String) -> CmdResult<()> {
+    let site = config::find_site(&id)
+        .map_err(e)?
+        .ok_or_else(|| format!("proyecto {id} no encontrado"))?;
+    // Idempotente: garantiza que `wp` exista antes de abrir la terminal.
+    cli::install_cli_wrapper().map_err(e)?;
+    cli::open_terminal_at(std::path::Path::new(&site.path)).map_err(e)
+}
+
 /// Empieza a emitir eventos `log:{id}` con los logs del container del proyecto.
 #[tauri::command]
 async fn stream_logs(app: AppHandle, state: State<'_, LogStreams>, id: String) -> CmdResult<()> {
@@ -477,6 +489,15 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(LogStreams::default())
         .setup(|app| {
+            // Instala los wrappers WP-CLI (`wp`, `wordpress-panel-cli`) una vez al
+            // arrancar. Son globales del usuario (en ~/.local/bin) y detectan el
+            // proyecto por el CWD, así que no hay nada por-proyecto que instalar.
+            // Idempotente y best-effort: si falla (p. ej. ~/.local/bin no escribible),
+            // el botón manual sigue disponible.
+            if let Err(err) = cli::install_cli_wrapper() {
+                eprintln!("no se pudieron instalar los wrappers WP-CLI: {err}");
+            }
+
             // Servidor D-Bus para el plasmoid KDE. Si la sesión D-Bus no está
             // disponible, el panel sigue funcionando igual (solo sin widget).
             let handle = app.handle().clone();
@@ -511,6 +532,7 @@ pub fn run() {
             repair_autologin,
             open_site,
             open_folder,
+            open_terminal,
             stream_logs,
             stop_logs,
             list_plugins,
