@@ -433,6 +433,36 @@ la DB a medio importar (corrupta) si se mataba la app. Tres cambios en
 - **Fix**: añadido `--user www-data` al `docker exec` del wrapper. El refresco del
   script se aplica solo al reabrir el panel (auto-instalación idempotente).
 
+## Git/GitHub — repos en cualquier ruta, autodetección y VSCode
+
+- **Antes**: el modelo solo admitía 1 theme + N plugins, clonados forzosamente a
+  `wp-content/themes|plugins`. No detectaba repos git ya presentes ni permitía
+  abrir el proyecto en un editor.
+- **Modelo genérico** (`config.rs`): `GithubConfig` pasa a una lista única
+  `repos: Vec<GithubRepo>` en cualquier ruta bajo public/. Los campos legacy
+  `theme`/`plugins` se conservan solo para leer config.json antiguos;
+  `GithubConfig::normalize()` (en `read_site_config`) los pliega en `repos` y los
+  deja de serializar (`skip_serializing_if`). Migración transparente, idempotente.
+- **Clonar a cualquier sitio** (`gh_clone`): `kind` (theme/plugin/muplugin) sigue
+  proponiendo ruta bajo wp-content, pero un `path` explícito (rel. a public/) la
+  sobreescribe. Ya no se restringe a themes/plugins.
+- **Autodetección** (`github::scan` → `gh_scan`): recorre `wp-content` (prof. 4,
+  salta `node_modules`/`vendor`, no desciende dentro de un repo), devuelve
+  `DetectedRepo` con ruta, remoto (`origin`), rama y `registered`. Los git
+  huérfanos (sin registrar, con o sin remoto) se pueden adoptar con `gh_register`
+  (lee remoto/rama del disco, no clona).
+- **Abrir en VSCode** (`open_vscode` + `github::ensure_workspace`): genera **una
+  vez** `<nombre>.code-workspace` en la raíz del proyecto (carpeta principal
+  `app/public` + cada repo git detectado como root adicional, multi-root) y lo
+  abre con el primer binario disponible (`code`/`codium`/`code-insiders`). Si el
+  workspace ya existe no se toca: el usuario puede editarlo a mano.
+- **UI** (tab *GitHub* de la página de proyecto, reescrito): botón «Abrir en
+  VSCode» (no requiere `gh`), lista de repos git detectados con Pull/Quitar
+  (registrados) o «Registrar» (huérfanos, resaltados en ámbar), «Re-escanear»,
+  «Pull todo», y formulario de clonado con selector de categoría + ruta custom
+  opcional. `api.ghScan`/`ghRegister`/`openVscode`; `ghClone` acepta `path?`,
+  `ghRemove` ya no necesita `kind`.
+
 ## Borrar proyecto (con opción de conservar la carpeta)
 
 Botón **"Eliminar"** en el dashboard (cada tarjeta) y en la vista de proyecto,

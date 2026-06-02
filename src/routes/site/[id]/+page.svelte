@@ -4,7 +4,7 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { api } from '$lib/api';
-  import type { SiteState, GhStatus, Endpoint } from '$lib/types';
+  import type { SiteState, GhStatus, DetectedRepo, Endpoint } from '$lib/types';
   import OpConsole from '$lib/components/OpConsole.svelte';
   import DeleteProjectModal from '$lib/components/DeleteProjectModal.svelte';
 
@@ -194,18 +194,30 @@
     }
   }
 
-  // --- GitHub ---------------------------------------------------------------
+  // --- GitHub / Git ---------------------------------------------------------
   let gh = $state<GhStatus | null>(null);
   let ghError = $state<string | null>(null);
   let ghBusy = $state(false);
-  let themeRepo = $state('');
-  let themeBranch = $state('main');
-  let pluginRepo = $state('');
-  let pluginBranch = $state('main');
+  // Clonar repo nuevo
+  let cloneRepo = $state('');
+  let cloneBranch = $state('main');
+  let cloneKind = $state<'theme' | 'plugin' | 'muplugin'>('plugin');
+  let clonePath = $state(''); // ruta custom opcional (relativa a public/)
+  // Repos git detectados en disco (registrados + huérfanos)
+  let detected = $state<DetectedRepo[]>([]);
 
   async function loadGh() {
     try {
       gh = await api.ghStatus();
+    } catch (e) {
+      ghError = String(e);
+    }
+    await scanRepos();
+  }
+
+  async function scanRepos() {
+    try {
+      detected = await api.ghScan(id);
     } catch (e) {
       ghError = String(e);
     }
@@ -217,12 +229,15 @@
     try {
       await fn();
       await load();
+      await scanRepos();
     } catch (e) {
       ghError = String(e);
     } finally {
       ghBusy = false;
     }
   }
+
+  let orphans = $derived(detected.filter((r) => !r.registered));
 
   $effect(() => {
     if (tab === 'github' && gh === null) loadGh();
@@ -443,78 +458,86 @@
       </div>
     {/if}
   {:else if tab === 'github'}
-    {#if gh === null}
-      <p class="text-sm text-zinc-500">Comprobando gh…</p>
-    {:else if !gh.installed}
-      <p class="text-sm text-amber-500">
-        `gh` no está instalado. Instálalo con <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">sudo pacman -S github-cli</code>.
-      </p>
-    {:else if !gh.authenticated}
-      <p class="text-sm text-amber-500">
-        `gh` no tiene sesión. Ejecuta <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">gh auth login</code> en una terminal.
-      </p>
-    {:else}
-      <div class="mb-4 rounded border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900 dark:bg-green-950 dark:text-green-300">
-        ✓ gh autenticado{gh.user ? ` como @${gh.user}` : ''}
+    <!-- Editar en VSCode: no requiere gh ni sesión de GitHub -->
+    <div class="mb-4 flex items-center justify-between gap-3 rounded border border-zinc-200 px-3 py-2 dark:border-zinc-800">
+      <div class="min-w-0 text-sm">
+        <div class="font-medium">Editar en VSCode</div>
+        <div class="text-xs text-zinc-500">Abre un workspace con <code>public/</code> como carpeta principal y cada repo git detectado como adicional. Se crea una vez; luego puedes editarlo a mano.</div>
       </div>
+      <button class="shrink-0 rounded bg-blue-600 px-3 py-1 text-sm font-medium text-white disabled:opacity-50" disabled={ghBusy}
+        onclick={() => ghAction(() => api.openVscode(id))}>Abrir en VSCode</button>
+    </div>
 
-      {#if ghError}
-        <div class="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">{ghError}</div>
-      {/if}
+    {#if ghError}
+      <div class="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">{ghError}</div>
+    {/if}
 
-      <!-- Theme -->
-      <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Theme</h3>
-      {#if site.config.github.theme}
-        <div class="mb-4 flex items-center justify-between rounded border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
-          <div>
-            <div class="font-medium">{site.config.github.theme.repo}</div>
-            <div class="text-xs text-zinc-500">{site.config.github.theme.path} · {site.config.github.theme.branch}</div>
-          </div>
-          <div class="flex gap-2">
-            <button class="rounded bg-zinc-200 px-2 py-1 text-xs dark:bg-zinc-800" disabled={ghBusy}
-              onclick={() => ghAction(() => api.ghPull(id, site!.config.github.theme!.path, site!.config.github.theme!.branch))}>Pull</button>
-            <button class="rounded px-2 py-1 text-xs text-red-500" disabled={ghBusy}
-              onclick={() => ghAction(() => api.ghRemove(id, 'theme', site!.config.github.theme!.path))}>✕</button>
-          </div>
-        </div>
-      {:else}
-        <div class="mb-4 flex gap-2 text-sm">
-          <input class="flex-1 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" placeholder="owner/mi-theme" bind:value={themeRepo} />
-          <input class="w-24 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" placeholder="branch" bind:value={themeBranch} />
-          <button class="rounded bg-blue-600 px-3 py-1 font-medium text-white disabled:opacity-50" disabled={ghBusy || !themeRepo}
-            onclick={() => ghAction(() => api.ghClone(id, 'theme', themeRepo, themeBranch))}>Clonar</button>
-        </div>
-      {/if}
-
-      <!-- Plugins -->
-      <div class="mb-2 flex items-center justify-between">
-        <h3 class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Plugins</h3>
-        {#if site.config.github.plugins.length > 0}
-          <button class="text-xs text-blue-500 underline" disabled={ghBusy} onclick={() => ghAction(() => api.ghPullAll(id))}>Pull todo</button>
+    <!-- Repos git detectados en wp-content (registrados + huérfanos) -->
+    <div class="mb-2 flex items-center justify-between">
+      <h3 class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Repos git ({detected.length})</h3>
+      <div class="flex gap-3 text-xs">
+        <button class="text-blue-500 underline disabled:opacity-50" disabled={ghBusy} onclick={scanRepos}>Re-escanear</button>
+        {#if detected.some((r) => r.registered)}
+          <button class="text-blue-500 underline disabled:opacity-50" disabled={ghBusy} onclick={() => ghAction(() => api.ghPullAll(id))}>Pull todo</button>
         {/if}
       </div>
-      <div class="mb-3 flex flex-col gap-2">
-        {#each site.config.github.plugins as p (p.path)}
-          <div class="flex items-center justify-between rounded border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
-            <div>
-              <div class="font-medium">{p.repo}</div>
-              <div class="text-xs text-zinc-500">{p.path} · {p.branch}</div>
+    </div>
+
+    {#if detected.length === 0}
+      <p class="mb-4 text-sm text-zinc-500">No se encontraron repos git en <code>wp-content</code>.</p>
+    {:else}
+      <div class="mb-5 flex flex-col gap-2">
+        {#each detected as r (r.path)}
+          <div class="flex items-center justify-between gap-2 rounded border px-3 py-2 text-sm {r.registered ? 'border-zinc-200 dark:border-zinc-800' : 'border-amber-300 dark:border-amber-900/60'}">
+            <div class="min-w-0">
+              <div class="truncate font-medium">{r.remote ?? r.name}</div>
+              <div class="truncate text-xs text-zinc-500">{r.path}{r.branch ? ` · ${r.branch}` : ''}{r.remote ? '' : ' · sin remoto'}</div>
             </div>
-            <div class="flex gap-2">
-              <button class="rounded bg-zinc-200 px-2 py-1 text-xs dark:bg-zinc-800" disabled={ghBusy}
-                onclick={() => ghAction(() => api.ghPull(id, p.path, p.branch))}>Pull</button>
-              <button class="rounded px-2 py-1 text-xs text-red-500" disabled={ghBusy}
-                onclick={() => ghAction(() => api.ghRemove(id, 'plugin', p.path))}>✕</button>
+            <div class="flex shrink-0 gap-2">
+              {#if r.registered}
+                {#if r.remote}
+                  <button class="rounded bg-zinc-200 px-2 py-1 text-xs dark:bg-zinc-800" disabled={ghBusy}
+                    onclick={() => ghAction(() => api.ghPull(id, r.path, r.branch ?? ''))}>Pull</button>
+                {/if}
+                <button class="rounded px-2 py-1 text-xs text-red-500" disabled={ghBusy} title="Quitar del proyecto (borra la carpeta)"
+                  onclick={() => ghAction(() => api.ghRemove(id, r.path))}>✕</button>
+              {:else}
+                <button class="rounded bg-amber-500 px-2 py-1 text-xs font-medium text-white disabled:opacity-50" disabled={ghBusy} title="Registrar en el proyecto"
+                  onclick={() => ghAction(() => api.ghRegister(id, r.path))}>Registrar</button>
+              {/if}
             </div>
           </div>
         {/each}
       </div>
-      <div class="flex gap-2 text-sm">
-        <input class="flex-1 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" placeholder="owner/mi-plugin" bind:value={pluginRepo} />
-        <input class="w-24 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" placeholder="branch" bind:value={pluginBranch} />
-        <button class="rounded bg-blue-600 px-3 py-1 font-medium text-white disabled:opacity-50" disabled={ghBusy || !pluginRepo}
-          onclick={() => ghAction(() => api.ghClone(id, 'plugin', pluginRepo, pluginBranch).then(() => (pluginRepo = '')))}>Agregar</button>
+    {/if}
+
+    <!-- Clonar desde GitHub (requiere gh) -->
+    {#if gh === null}
+      <p class="text-sm text-zinc-500">Comprobando gh…</p>
+    {:else if !gh.installed}
+      <p class="text-sm text-amber-500">
+        `gh` no está instalado. Instálalo con <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">sudo pacman -S github-cli</code> para clonar desde GitHub.
+      </p>
+    {:else if !gh.authenticated}
+      <p class="text-sm text-amber-500">
+        `gh` sin sesión. Ejecuta <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">gh auth login</code> para clonar desde GitHub.
+      </p>
+    {:else}
+      <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        Clonar repo {#if gh.user}<span class="font-normal normal-case text-green-600 dark:text-green-400">· @{gh.user}</span>{/if}
+      </h3>
+      <div class="flex flex-wrap gap-2 text-sm">
+        <input class="min-w-40 flex-1 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" placeholder="owner/repo" bind:value={cloneRepo} />
+        <input class="w-24 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" placeholder="branch" bind:value={cloneBranch} />
+        <select class="rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" bind:value={cloneKind}>
+          <option value="plugin">plugins/</option>
+          <option value="theme">themes/</option>
+          <option value="muplugin">mu-plugins/</option>
+        </select>
+        <button class="rounded bg-blue-600 px-3 py-1 font-medium text-white disabled:opacity-50" disabled={ghBusy || !cloneRepo}
+          onclick={() => ghAction(() => api.ghClone(id, cloneKind, cloneRepo, cloneBranch, clonePath || undefined).then(() => { cloneRepo = ''; clonePath = ''; }))}>Clonar</button>
       </div>
+      <input class="mt-2 w-full rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900" placeholder="ruta custom relativa a public/ (opcional; ignora la categoría)" bind:value={clonePath} />
     {/if}
   {:else if tab === 'svc'}
     {#if svcErr}

@@ -77,18 +77,34 @@ pub struct GithubRepo {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GithubConfig {
-    pub theme: Option<GithubRepo>,
+    /// Lista genérica de repos del proyecto (en cualquier ruta bajo public/).
+    /// Cada repo puede o no tener remoto en GitHub.
     #[serde(default)]
+    pub repos: Vec<GithubRepo>,
+    /// Legacy: antes había un único theme y una lista de plugins. Se conservan
+    /// solo para leer config.json antiguos; `normalize()` los pliega en `repos`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<GithubRepo>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugins: Vec<GithubRepo>,
 }
 
-impl Default for GithubConfig {
-    fn default() -> Self {
-        GithubConfig {
-            theme: None,
-            plugins: Vec::new(),
+impl GithubConfig {
+    /// Migra los campos legacy (`theme`, `plugins`) a la lista genérica `repos`
+    /// y los vacía. Idempotente: si no hay legacy, no hace nada.
+    pub fn normalize(&mut self) {
+        let legacy: Vec<GithubRepo> = self
+            .theme
+            .take()
+            .into_iter()
+            .chain(std::mem::take(&mut self.plugins))
+            .collect();
+        for r in legacy {
+            if !self.repos.iter().any(|e| e.path == r.path) {
+                self.repos.push(r);
+            }
         }
     }
 }
@@ -307,8 +323,9 @@ pub fn load_all_sites() -> Result<Vec<SiteConfig>> {
 pub fn read_site_config(path: &Path) -> Result<SiteConfig> {
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("leyendo {:?}", path))?;
-    let cfg: SiteConfig = serde_json::from_str(&raw)
+    let mut cfg: SiteConfig = serde_json::from_str(&raw)
         .with_context(|| format!("parseando {:?}", path))?;
+    cfg.github.normalize();
     Ok(cfg)
 }
 
@@ -516,6 +533,34 @@ mod tests {
         };
         assert_eq!(alterno.site_url("demo.test", true), "https://demo.test:8443");
         assert_eq!(alterno.site_url("demo.test", false), "http://demo.test:8080");
+    }
+
+    #[test]
+    fn github_normalize_pliega_legacy_en_repos() {
+        let mut gh = GithubConfig {
+            repos: vec![],
+            theme: Some(GithubRepo {
+                repo: "me/theme".into(),
+                branch: "main".into(),
+                path: "wp-content/themes/t".into(),
+            }),
+            plugins: vec![GithubRepo {
+                repo: "me/plug".into(),
+                branch: "dev".into(),
+                path: "wp-content/plugins/p".into(),
+            }],
+        };
+        gh.normalize();
+        assert_eq!(gh.repos.len(), 2);
+        assert!(gh.theme.is_none());
+        assert!(gh.plugins.is_empty());
+        // idempotente y sin duplicar por path
+        gh.normalize();
+        assert_eq!(gh.repos.len(), 2);
+        // legacy ya no se serializa
+        let v = serde_json::to_value(&gh).unwrap();
+        assert!(v.get("theme").is_none(), "theme no debe serializarse: {v}");
+        assert!(v.get("plugins").is_none(), "plugins no debe serializarse: {v}");
     }
 
     #[test]

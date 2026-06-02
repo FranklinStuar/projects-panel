@@ -24,7 +24,7 @@ export function makeSite(over: Partial<SiteConfig> & { id: string; name: string 
       nginx: { ssl: true },
       db: { type: 'mysql', version: '8.0', dbName: `${slug.replace(/-/g, '_')}_db` }
     },
-    github: { theme: null, plugins: [] },
+    github: { repos: [] },
     oneClickAdmin: true,
     xdebugEnabled: false,
     headless: false,

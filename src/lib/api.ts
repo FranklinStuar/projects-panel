@@ -5,6 +5,7 @@ import type {
   WpVersion,
   NewSiteRequest,
   GhStatus,
+  DetectedRepo,
   Endpoint,
   SystemStatus,
   Migration,
@@ -46,13 +47,22 @@ export const api = {
   listPlugins: (id: string) => invoke<string>('list_plugins', { id }),
   listThemes: (id: string) => invoke<string>('list_themes', { id }),
   ghStatus: () => invoke<GhStatus>('gh_status'),
-  ghClone: (id: string, kind: 'theme' | 'plugin', repo: string, branch: string) =>
-    invoke<SiteConfig>('gh_clone', { id, kind, repo, branch }),
+  ghClone: (
+    id: string,
+    kind: 'theme' | 'plugin' | 'muplugin',
+    repo: string,
+    branch: string,
+    path?: string,
+  ) => invoke<SiteConfig>('gh_clone', { id, kind, repo, branch, path: path ?? null }),
   ghPull: (id: string, path: string, branch: string) =>
     invoke<string>('gh_pull', { id, path, branch }),
   ghPullAll: (id: string) => invoke<string>('gh_pull_all', { id }),
-  ghRemove: (id: string, kind: 'theme' | 'plugin', path: string) =>
-    invoke<SiteConfig>('gh_remove', { id, kind, path }),
+  ghRemove: (id: string, path: string) =>
+    invoke<SiteConfig>('gh_remove', { id, path }),
+  ghScan: (id: string) => invoke<DetectedRepo[]>('gh_scan', { id }),
+  ghRegister: (id: string, path: string) =>
+    invoke<SiteConfig>('gh_register', { id, path }),
+  openVscode: (id: string) => invoke<void>('open_vscode', { id }),
   regenerateSsl: (id: string) => invoke<void>('regenerate_ssl', { id }),
   setSiteGroup: (id: string, group: string | null) =>
     invoke<SiteConfig>('set_site_group', { id, group }),

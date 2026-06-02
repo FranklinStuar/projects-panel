@@ -29,8 +29,19 @@ export interface GithubRepo {
 }
 
 export interface GithubConfig {
-  theme: GithubRepo | null;
-  plugins: GithubRepo[];
+  repos: GithubRepo[];
+  // Legacy: el backend los pliega en `repos` al cargar; ya no se usan en la UI.
+  theme?: GithubRepo | null;
+  plugins?: GithubRepo[];
+}
+
+/** Repo git encontrado en disco bajo wp-content (registrado o huérfano). */
+export interface DetectedRepo {
+  path: string;
+  name: string;
+  remote: string | null;
+  branch: string | null;
+  registered: boolean;
 }
 
 export interface SiteConfig {
