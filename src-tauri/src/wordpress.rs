@@ -161,10 +161,7 @@ pub async fn create_site(docker: &DockerManager, req: NewSiteRequest) -> Result<
     download_core(&req.wp_version, &site.public_dir()).await?;
 
     // 6. mu-plugins: mailpit (siempre) + auto-login (si one-click)
-    inject_mailpit_muplugin(&site)?;
-    if site.one_click_admin {
-        inject_autologin_muplugin(&site)?;
-    }
+    sync_mu_plugins(&site)?;
 
     // 7. SSL: generar certificado antes de levantar nginx (el vhost lo referencia)
     if site.services.nginx.ssl {
@@ -351,6 +348,19 @@ async fn wp_core_install(
             "--activate".to_string(),
         ];
         crate::wpcli::run(docker, site, &lang).await.ok();
+    }
+    Ok(())
+}
+
+/// (Re)inyecta los mu-plugins gestionados por el panel: mailpit (siempre) y
+/// auto-login (si el proyecto lo tiene activado). Idempotente: sobrescribe los
+/// ficheros propios del panel. Se usa al crear y al migrar — un import de LocalWP
+/// no los trae (por eso su admin no auto-logueaba como los nativos) y una copia
+/// de otro sistema puede traerlos desfasados.
+pub(crate) fn sync_mu_plugins(site: &SiteConfig) -> Result<()> {
+    inject_mailpit_muplugin(site)?;
+    if site.one_click_admin {
+        inject_autologin_muplugin(site)?;
     }
     Ok(())
 }

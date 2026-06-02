@@ -188,6 +188,20 @@ async fn open_admin(app: AppHandle, id: String) -> CmdResult<()> {
     autologin::open_admin(&app, &docker, &site).await.map_err(e)
 }
 
+/// (Re)inyecta el mu-plugin de auto-login (y el de mailpit) en un proyecto y
+/// activa `oneClickAdmin`. Pensado para proyectos importados de LocalWP, que se
+/// crearon sin estos mu-plugins y por eso no auto-logueaban al admin. Es
+/// idempotente y no requiere que el proyecto esté encendido (los mu-plugins van
+/// montados desde el disco).
+#[tauri::command]
+async fn repair_autologin(id: String) -> CmdResult<SiteConfig> {
+    let mut site = load_site(&id)?;
+    site.one_click_admin = true;
+    config::write_site_config(&site).map_err(e)?;
+    wordpress::sync_mu_plugins(&site).map_err(e)?;
+    Ok(site)
+}
+
 /// Abre la web pública del proyecto (home, sin auto-login) en el navegador.
 #[tauri::command]
 async fn open_site(app: AppHandle, id: String) -> CmdResult<()> {
@@ -494,6 +508,7 @@ pub fn run() {
             list_localwp_sites,
             import_localwp_site,
             open_admin,
+            repair_autologin,
             open_site,
             open_folder,
             stream_logs,

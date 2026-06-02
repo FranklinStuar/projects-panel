@@ -98,6 +98,12 @@ export function installMockIpc() {
         return { site: s!.config, note: null } satisfies Migration;
       }
 
+      case 'repair_autologin': {
+        const s = find(id);
+        if (s) s.config.oneClickAdmin = true;
+        return s ? { ...s.config } : null;
+      }
+
       // --- cancelar importación (borra el proyecto) ---
       case 'delete_site':
         sites = sites.filter((s) => s.config.id !== id);

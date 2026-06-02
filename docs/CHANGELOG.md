@@ -368,6 +368,22 @@ la DB a medio importar (corrupta) si se mataba la app. Tres cambios en
   para Postgres, `server` para MySQL/MariaDB). Botón «Ver base de datos (Adminer)»
   en la sección Base de datos de la página de proyecto.
 
+## Fix — Auto-login en proyectos importados de LocalWP
+
+- **Causa**: `create_site` inyectaba los mu-plugins del panel (mailpit +
+  `panel-autologin.php`) en el paso 6, pero `localwp::import_site` y `migrate` no.
+  Un proyecto importado llegaba sin `panel-autologin.php`, así que «Abrir admin»
+  no auto-logueaba (el mu-plugin que valida el token no existía).
+- **`wordpress::sync_mu_plugins(site)`**: helper idempotente que (re)inyecta
+  mailpit (siempre) + auto-login (si `oneClickAdmin`). `create_site` ahora lo usa;
+  `migrate` lo llama tras verificar la carpeta — cubre el import de LocalWP **y**
+  copias entre sistemas (mu-plugins desfasados se refrescan).
+- **Comando `repair_autologin(id)`** (`lib.rs`): para proyectos **ya importados**
+  antes del fix. Activa `oneClickAdmin` y reinyecta los mu-plugins; idempotente y
+  no requiere el proyecto encendido (los mu-plugins van montados desde disco).
+  Botón «Reparar auto-login» en el tab *Plugins / Themes* de la página de proyecto
+  (`api.repairAutologin`; mock en `src/lib/dev/mock-ipc.ts`).
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).
