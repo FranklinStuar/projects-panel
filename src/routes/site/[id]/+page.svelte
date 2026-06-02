@@ -76,7 +76,34 @@
     busy = true;
     error = null;
     try {
-      await api.deleteSite(id);
+      await api.deleteSite(id, true);
+      await goto('/');
+    } catch (e) {
+      error = String(e);
+      busy = false;
+    }
+  }
+
+  // Borra el proyecto: siempre elimina los datos (base de datos + containers) y
+  // pregunta si borrar también la carpeta del disco. Si se conserva, el panel la
+  // olvida (desconecta) pero los archivos quedan para reconfigurar luego.
+  async function deleteProject() {
+    if (!site) return;
+    if (
+      !confirm(
+        `Eliminar "${site.config.name}"?\n\nSe borrarán todos los datos del proyecto (base de datos y containers). Esta acción no se puede deshacer.`
+      )
+    )
+      return;
+    const deleteFolder = confirm(
+      `¿Borrar también la carpeta del proyecto en disco?\n${site.config.path}\n\n` +
+        `Aceptar: borrar la carpeta (no queda nada).\n` +
+        `Cancelar: conservarla — el panel la desconecta, pero los archivos quedan para reconfigurarla más tarde.`
+    );
+    busy = true;
+    error = null;
+    try {
+      await api.deleteSite(id, deleteFolder);
       await goto('/');
     } catch (e) {
       error = String(e);
@@ -307,6 +334,14 @@
           onclick={toggle}
         >
           {busy ? '…' : site.status === 'running' ? 'Detener' : 'Encender'}
+        </button>
+        <button
+          class="rounded px-3 py-1.5 text-sm font-medium text-zinc-400 hover:text-red-500 disabled:opacity-50"
+          disabled={busy}
+          title="Eliminar proyecto"
+          onclick={deleteProject}
+        >
+          Eliminar
         </button>
       {/if}
     </div>

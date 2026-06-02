@@ -70,7 +70,34 @@
     busy = { ...busy, [s.config.id]: true };
     error = null;
     try {
-      await api.deleteSite(s.config.id);
+      await api.deleteSite(s.config.id, true);
+      await load();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = { ...busy, [s.config.id]: false };
+    }
+  }
+
+  // Borra un proyecto: siempre elimina los datos (base de datos + containers) y
+  // luego pregunta si borrar también la carpeta del disco. Si se conserva, el
+  // panel la olvida (desconecta) pero los archivos quedan para reconfigurar.
+  async function deleteProject(s: SiteState) {
+    if (
+      !confirm(
+        `Eliminar "${s.config.name}"?\n\nSe borrarán todos los datos del proyecto (base de datos y containers). Esta acción no se puede deshacer.`
+      )
+    )
+      return;
+    const deleteFolder = confirm(
+      `¿Borrar también la carpeta del proyecto en disco?\n${s.config.path}\n\n` +
+        `Aceptar: borrar la carpeta (no queda nada).\n` +
+        `Cancelar: conservarla — el panel la desconecta, pero los archivos quedan para reconfigurarla más tarde.`
+    );
+    busy = { ...busy, [s.config.id]: true };
+    error = null;
+    try {
+      await api.deleteSite(s.config.id, deleteFolder);
       await load();
     } catch (e) {
       error = String(e);
@@ -190,17 +217,27 @@
                 </button>
               </div>
             {:else}
-              <button
-                class="rounded px-3 py-1.5 text-sm font-medium"
-                class:bg-green-600={s.status !== 'running'}
-                class:text-white={s.status !== 'running'}
-                class:bg-zinc-200={s.status === 'running'}
-                class:dark:bg-zinc-800={s.status === 'running'}
-                disabled={busy[s.config.id]}
-                onclick={() => toggle(s)}
-              >
-                {busy[s.config.id] ? '…' : s.status === 'running' ? 'Detener' : 'Encender'}
-              </button>
+              <div class="flex items-center gap-2">
+                <button
+                  class="rounded px-3 py-1.5 text-sm font-medium"
+                  class:bg-green-600={s.status !== 'running'}
+                  class:text-white={s.status !== 'running'}
+                  class:bg-zinc-200={s.status === 'running'}
+                  class:dark:bg-zinc-800={s.status === 'running'}
+                  disabled={busy[s.config.id]}
+                  onclick={() => toggle(s)}
+                >
+                  {busy[s.config.id] ? '…' : s.status === 'running' ? 'Detener' : 'Encender'}
+                </button>
+                <button
+                  class="rounded px-2 py-1.5 text-sm text-zinc-400 hover:text-red-500 disabled:opacity-50"
+                  disabled={busy[s.config.id]}
+                  title="Eliminar proyecto"
+                  onclick={() => deleteProject(s)}
+                >
+                  Eliminar
+                </button>
+              </div>
             {/if}
           </div>
         {/each}
