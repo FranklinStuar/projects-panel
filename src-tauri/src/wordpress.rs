@@ -297,6 +297,32 @@ pub(crate) async fn reset_database(
     create_database(docker, db_container, site).await
 }
 
+/// Borra la base de datos del proyecto del servidor compartido (sin recrearla).
+/// La usa el borrado de proyecto: «borra todos los datos» elimina el esquema del
+/// container de DB compartido aunque la carpeta del proyecto se conserve.
+pub(crate) async fn drop_database(
+    docker: &DockerManager,
+    db_container: &str,
+    site: &SiteConfig,
+) -> Result<()> {
+    let db = &site.services.db;
+    match db.db_type {
+        DbType::Mysql | DbType::Mariadb => {
+            let sql = format!("DROP DATABASE IF EXISTS `{}`;", db.db_name);
+            docker
+                .exec(db_container, vec!["mysql", "-uroot", "-ppanel", "-e", &sql])
+                .await?;
+        }
+        DbType::Postgres => {
+            let sql = format!("DROP DATABASE IF EXISTS \"{}\";", db.db_name);
+            docker
+                .exec(db_container, vec!["psql", "-U", "panel", "-c", &sql])
+                .await?;
+        }
+    }
+    Ok(())
+}
+
 /// Genera `wp-config.php` con las credenciales del panel (`--force` lo reescribe).
 /// Lo reusa la migración para repuntar un proyecto traído de otro sistema.
 pub(crate) async fn wp_config_create(
