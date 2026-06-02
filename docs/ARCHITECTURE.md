@@ -129,7 +129,7 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `create_panel_network` | — | `()` | Crea el bridge `panel-net` si falta. |
 | `reset_endpoint` | — | `()` | Olvida el endpoint persistido (reasigna puerto al próximo arranque). |
 | `migrate_site` | `id` | `Migration` | Migra un proyecto pendiente (DB + dump + SSL) y lo enciende. Emite `op-log`. |
-| `delete_site` | `id`, `deleteFolder` | `()` | Borra un proyecto: apaga + container/vhost + DROP de su DB del servidor compartido. `deleteFolder=true` borra la carpeta entera; `false` solo quita `config.json` (la desconecta del panel; los archivos quedan para reconfigurar). |
+| `delete_site` | `id`, `deleteFolder` | `()` | Borra un proyecto: apaga + container/vhost + DROP de su DB del servidor compartido. `deleteFolder=true` borra la carpeta entera; `false` solo quita `config.json` (la desconecta del panel; los archivos quedan para reconfigurar). Emite `op-log` con cada paso. |
 | `list_localwp_sites` | — | `Vec<LocalSite>` | Sitios de LocalWP candidatos a importar. |
 | `import_localwp_site` | `id` | `ImportResult` | Importa un sitio de LocalWP (queda `migrationPending`). |
 | `open_admin` | `id` | `()` | Abre el admin en el navegador (auto-login si está activo). |
@@ -156,8 +156,11 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 
 **Eventos** (backend → frontend, vía `app.emit`): `log:{id}` — una línea de log de
 container por evento; `op-log` — línea de progreso de una operación larga
-(migración/import), mostrada en `OpConsole.svelte`. El frontend se suscribe con `listen()` de `@tauri-apps/api/event`. Estado
+(migración/import/borrado), mostrada en `OpConsole.svelte`. El frontend se suscribe con `listen()` de `@tauri-apps/api/event`. Estado
 de los streams activos en `LogStreams` (managed state, `Mutex<HashMap>`).
+El canal `op-log` también lo emite el **frontend** (con `emit()`) para las líneas
+de la ventana de gracia del borrado (cuenta atrás de 5 s antes de llamar a
+`delete_site`); como el listener es el mismo, se ven igual que los pasos del backend.
 
 > **Capability obligatoria para eventos.** En Tauri 2 los comandos propios
 > (`#[tauri::command]`) no pasan por el ACL, pero `listen()`/`emit()` usan el
@@ -219,6 +222,12 @@ Origen import LocalWP (solo lectura): ~/.config/Local/sites.json + ~/Local Sites
   fallback `index.html`. El routing (incl. `/site/[id]`) es 100% cliente.
 - `lib/api.ts` envuelve `invoke`. `lib/types.ts` = espejo de los modelos serde
   (incl. `Endpoint` + helper `siteUrl`).
+- Componentes (`lib/components/`): `OpConsole.svelte` — consola modal que escucha
+  `op-log` y muestra los pasos en vivo (botón «Cerrar» bloqueado mientras corre;
+  botón «Cancelar borrado» opcional). `DeleteProjectModal.svelte` — borrado de un
+  proyecto: modal de confirmación (titulado con el nombre + checkbox para borrar
+  también la carpeta) y, al confirmar, `OpConsole` con la ventana de gracia de 5 s
+  y `delete_site`. Se usa en el dashboard y en `/site/[id]` (`bind:site`).
 - Tailwind (`darkMode: 'class'`, clase `dark` en `<html>`). Tema dark-only navy
   **"DevFlow Dark Blue"** (`DESIGN.md`): la escala `zinc` está remapeada a navy
   en `tailwind.config.js`, así los `dark:bg-zinc-*` existentes heredan el tema
