@@ -323,6 +323,144 @@ pub fn find_site(id: &str) -> Result<Option<SiteConfig>> {
     Ok(load_all_sites()?.into_iter().find(|s| s.id == id))
 }
 
+// ---------------------------------------------------------------------------
+// Proyectos desconectados (carpeta conservada, fuera del panel)
+// ---------------------------------------------------------------------------
+
+/// Sidecar donde se guarda la config al desconectar un proyecto (borrar
+/// conservando la carpeta). Mientras exista este archivo —y NO `config.json`—
+/// la carpeta está «desconectada»: `load_all_sites()` la ignora pero se puede
+/// re-importar sin pérdida restaurando la config.
+pub(crate) const DISCONNECTED_CONFIG: &str = "config.disconnected.json";
+
+/// Versiones por defecto para carpetas viejas sin ninguna config (best-effort).
+const DEFAULT_PHP: &str = "8.3";
+const DEFAULT_DB: &str = "8.0";
+
+pub fn disconnected_config_path(path: &str) -> PathBuf {
+    Path::new(path).join(DISCONNECTED_CONFIG)
+}
+
+/// Una carpeta de `~/panel-wp/` que ya no está registrada en el panel pero que
+/// sigue en disco, candidata a re-importar (espejo en `types.ts`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisconnectedSite {
+    pub folder_name: String,
+    pub path: String,
+    pub name: String,
+    pub domain: String,
+    pub php_version: String,
+    pub db_version: String,
+    pub db_type: String,
+    /// Hay al menos un `*.sql` en `app/sql/` (dump restaurable al migrar).
+    pub has_dump: bool,
+    /// `preserved` = tenía `config.disconnected.json`; `reconstructed` = carpeta
+    /// vieja sin config, datos deducidos best-effort.
+    pub kind: String,
+}
+
+/// Escanea `~/panel-wp/` y devuelve las carpetas que NO están en el panel
+/// (sin `config.json`) pero que sí son proyectos del panel: con un sidecar
+/// `config.disconnected.json` (preserved) o, en su defecto, con
+/// `app/public/wp-config.php` (reconstructed).
+pub fn list_disconnected_sites() -> Result<Vec<DisconnectedSite>> {
+    let root = projects_root()?;
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(&root)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let dir = entry.path();
+        if dir.join("config.json").exists() {
+            continue; // sigue conectado al panel
+        }
+        let folder_name = entry.file_name().to_string_lossy().into_owned();
+        let path = dir.to_string_lossy().into_owned();
+        let has_dump = dir_has_sql(&dir.join("app").join("sql"));
+
+        let sidecar = dir.join(DISCONNECTED_CONFIG);
+        if sidecar.exists() {
+            if let Ok(cfg) = read_site_config(&sidecar) {
+                out.push(DisconnectedSite {
+                    folder_name,
+                    path,
+                    name: cfg.name,
+                    domain: cfg.domain,
+                    php_version: cfg.services.php.version,
+                    db_version: cfg.services.db.version,
+                    db_type: db_type_str(cfg.services.db.db_type),
+                    has_dump,
+                    kind: "preserved".into(),
+                });
+                continue;
+            }
+        }
+
+        // Sin sidecar: solo cuenta si parece un WordPress (tiene wp-config.php).
+        // El `dbName` se deduce al importar (lib.rs re-parsea wp-config.php).
+        let wp_config = dir.join("app").join("public").join("wp-config.php");
+        if wp_config.exists() {
+            out.push(DisconnectedSite {
+                name: folder_name.clone(),
+                domain: format!("{folder_name}.test"),
+                folder_name,
+                path,
+                php_version: DEFAULT_PHP.into(),
+                db_version: DEFAULT_DB.into(),
+                db_type: "mysql".into(),
+                has_dump,
+                kind: "reconstructed".into(),
+            });
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+/// ¿Hay algún `*.sql` en `dir`? (criterio de `migrate::latest_dump`.)
+fn dir_has_sql(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten().any(|e| {
+                e.path().extension().and_then(|x| x.to_str()) == Some("sql")
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn db_type_str(t: DbType) -> String {
+    match t {
+        DbType::Mysql => "mysql",
+        DbType::Mariadb => "mariadb",
+        DbType::Postgres => "postgres",
+    }
+    .to_string()
+}
+
+/// Extrae `DB_NAME` de un `wp-config.php` (`define('DB_NAME', '…')`).
+pub fn parse_db_name(wp_config: &str) -> Option<String> {
+    for line in wp_config.lines() {
+        let line = line.trim();
+        if !line.contains("DB_NAME") || !line.contains("define") {
+            continue;
+        }
+        // define( 'DB_NAME', 'valor' );  → segundo literal entre comillas.
+        let mut parts = line.splitn(3, |c| c == '\'' || c == '"');
+        let _before = parts.next()?; // define( DB_NAME → hasta la 1ª comilla
+        let _db_name_token = parts.next()?; // DB_NAME
+        let rest = parts.next()?; // ', 'valor' );
+        let mut it = rest.splitn(3, |c| c == '\'' || c == '"');
+        it.next()?; // ,
+        let value = it.next()?; // valor
+        if !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

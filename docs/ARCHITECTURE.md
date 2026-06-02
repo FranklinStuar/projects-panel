@@ -129,9 +129,11 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `create_panel_network` | — | `()` | Crea el bridge `panel-net` si falta. |
 | `reset_endpoint` | — | `()` | Olvida el endpoint persistido (reasigna puerto al próximo arranque). |
 | `migrate_site` | `id` | `Migration` | Migra un proyecto pendiente (DB + dump + SSL) y lo enciende. Emite `op-log`. |
-| `delete_site` | `id`, `deleteFolder` | `()` | Borra un proyecto: apaga + container/vhost + DROP de su DB del servidor compartido. `deleteFolder=true` borra la carpeta entera; `false` solo quita `config.json` (la desconecta del panel; los archivos quedan para reconfigurar). Emite `op-log` con cada paso. |
+| `delete_site` | `id`, `deleteFolder` | `()` | Borra un proyecto: apaga + container/vhost + DROP de su DB del servidor compartido. `deleteFolder=true` borra la carpeta entera; `false` la desconecta del panel renombrando `config.json` → `config.disconnected.json` (los archivos y la config quedan para re-importar). Emite `op-log` con cada paso. |
 | `list_localwp_sites` | — | `Vec<LocalSite>` | Sitios de LocalWP candidatos a importar. |
 | `import_localwp_site` | `id` | `ImportResult` | Importa un sitio de LocalWP (queda `migrationPending`). |
+| `list_disconnected_sites` | — | `Vec<DisconnectedSite>` | Carpetas de `~/panel-wp/` desconectadas (sin `config.json`): con `config.disconnected.json` (`preserved`) o con `app/public/wp-config.php` (`reconstructed`). |
+| `import_disconnected_site` | `folderName` | `ImportResult` | Re-importa una carpeta desconectada: restaura/reconstruye `config.json` y la deja `migrationPending`. Emite `op-log`. |
 | `open_admin` | `id` | `()` | Abre el admin en el navegador (auto-login si está activo). |
 | `repair_autologin` | `id` | `SiteConfig` | Activa `oneClickAdmin` y reinyecta los mu-plugins del panel (auto-login + mailpit). Para proyectos importados de LocalWP sin el plugin. No requiere proyecto encendido. |
 | `stream_logs` | `id` | `()` | Inicia el stream de logs → eventos `log:{id}`. |
@@ -228,6 +230,9 @@ Origen import LocalWP (solo lectura): ~/.config/Local/sites.json + ~/Local Sites
   proyecto: modal de confirmación (titulado con el nombre + checkbox para borrar
   también la carpeta) y, al confirmar, `OpConsole` con la ventana de gracia de 5 s
   y `delete_site`. Se usa en el dashboard y en `/site/[id]` (`bind:site`).
+  `ImportProjectModal.svelte` — modal del dashboard (botón «Importar proyecto»)
+  que lista las carpetas desconectadas (`list_disconnected_sites`) y re-importa
+  la elegida (`import_disconnected_site`) mostrando el progreso en `OpConsole`.
 - Tailwind (`darkMode: 'class'`, clase `dark` en `<html>`). Tema dark-only navy
   **"DevFlow Dark Blue"** (`DESIGN.md`): la escala `zinc` está remapeada a navy
   en `tailwind.config.js`, así los `dark:bg-zinc-*` existentes heredan el tema

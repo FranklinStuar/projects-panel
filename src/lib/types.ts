@@ -104,6 +104,20 @@ export interface ImportResult {
   note: string | null;
 }
 
+/// Espejo de `config::DisconnectedSite`: una carpeta de `~/panel-wp/` que ya no
+/// está en el panel pero sigue en disco, candidata a re-importar.
+export interface DisconnectedSite {
+  folderName: string;
+  path: string;
+  name: string;
+  domain: string;
+  phpVersion: string;
+  dbVersion: string;
+  dbType: DbType;
+  hasDump: boolean;
+  kind: 'preserved' | 'reconstructed';
+}
+
 export type SiteStatus = 'running' | 'stopped' | 'migrationPending';
 
 export interface SiteState {

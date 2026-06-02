@@ -9,7 +9,8 @@ import type {
   SystemStatus,
   Migration,
   LocalSite,
-  ImportResult
+  ImportResult,
+  DisconnectedSite
 } from './types';
 
 // Capa fina sobre los comandos IPC de Tauri (src-tauri/src/lib.rs).
@@ -33,6 +34,9 @@ export const api = {
     invoke<void>('delete_site', { id, deleteFolder }),
   listLocalwpSites: () => invoke<LocalSite[]>('list_localwp_sites'),
   importLocalwpSite: (id: string) => invoke<ImportResult>('import_localwp_site', { id }),
+  listDisconnectedSites: () => invoke<DisconnectedSite[]>('list_disconnected_sites'),
+  importDisconnectedSite: (folderName: string) =>
+    invoke<ImportResult>('import_disconnected_site', { folderName }),
   openAdmin: (id: string) => invoke<void>('open_admin', { id }),
   repairAutologin: (id: string) => invoke<SiteConfig>('repair_autologin', { id }),
   openSite: (id: string) => invoke<void>('open_site', { id }),

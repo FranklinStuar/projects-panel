@@ -7,6 +7,7 @@ import type {
   Endpoint,
   SystemStatus,
   LocalSite,
+  DisconnectedSite,
   WpVersion
 } from '$lib/types';
 
@@ -100,6 +101,35 @@ export function initialLocalSites(): LocalSite[] {
       multisite: true,
       xdebug: true,
       alreadyImported: true
+    }
+  ];
+}
+
+/** Carpetas desconectadas en ~/panel-wp/: una con config conservada (+dump),
+ *  otra reconstruida (carpeta vieja sin config, sin dump). */
+export function initialDisconnectedSites(): DisconnectedSite[] {
+  return [
+    {
+      folderName: 'cliente-antiguo',
+      path: '/home/u/panel-wp/cliente-antiguo',
+      name: 'Cliente Antiguo',
+      domain: 'cliente-antiguo.test',
+      phpVersion: '8.3',
+      dbVersion: '8.0',
+      dbType: 'mysql',
+      hasDump: true,
+      kind: 'preserved'
+    },
+    {
+      folderName: 'sitio-copiado',
+      path: '/home/u/panel-wp/sitio-copiado',
+      name: 'sitio-copiado',
+      domain: 'sitio-copiado.test',
+      phpVersion: '8.3',
+      dbVersion: '8.0',
+      dbType: 'mysql',
+      hasDump: false,
+      kind: 'reconstructed'
     }
   ];
 }
