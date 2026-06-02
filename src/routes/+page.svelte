@@ -9,6 +9,23 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let busy = $state<Record<string, boolean>>({});
+  let stoppingAll = $state(false);
+
+  async function stopAll() {
+    stoppingAll = true;
+    error = null;
+    // Marca como ocupados todos los encendidos para feedback inmediato.
+    busy = { ...busy, ...Object.fromEntries(sites.filter((s) => s.status === 'running').map((s) => [s.config.id, true])) };
+    try {
+      await api.stopAllSites();
+      await load();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = {};
+      stoppingAll = false;
+    }
+  }
 
   // Consola de progreso de migración.
   let consoleOpen = $state(false);
@@ -81,6 +98,9 @@
     }
   }
 
+  // Cuántos proyectos están encendidos (señal en "Apagar todo").
+  let runningCount = $derived(sites.filter((s) => s.status === 'running').length);
+
   // Agrupar por grupo (null = "Sin grupo")
   let groups = $derived.by(() => {
     const map = new Map<string, SiteState[]>();
@@ -99,10 +119,17 @@
   <h1 class="text-lg font-semibold">Proyectos</h1>
   <div class="flex gap-2">
     <button
-      class="rounded bg-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700"
-      onclick={() => api.stopAllSites().then(load)}
+      class="flex items-center gap-1.5 rounded bg-zinc-200 px-3 py-1.5 text-sm hover:bg-zinc-300 disabled:opacity-40 disabled:hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:disabled:hover:bg-zinc-800"
+      disabled={runningCount === 0 || stoppingAll}
+      title={runningCount === 0 ? 'No hay proyectos encendidos' : `${runningCount} encendido${runningCount === 1 ? '' : 's'}`}
+      onclick={stopAll}
     >
-      Apagar todo
+      {stoppingAll ? 'Apagando…' : 'Apagar todo'}
+      {#if runningCount > 0 && !stoppingAll}
+        <span class="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-green-500 px-1.5 text-xs font-semibold text-white">
+          {runningCount}
+        </span>
+      {/if}
     </button>
     <a
       href="/site/new"
