@@ -197,6 +197,107 @@ fn import_localwp_hermetico() {
 }
 
 // ---------------------------------------------------------------------------
+// Hermético (sin Docker): listar e importar proyectos desconectados
+// ---------------------------------------------------------------------------
+
+#[test]
+#[ignore = "muta HOME/XDG; correr con --ignored --test-threads=1"]
+fn list_e_import_disconnected_hermetico() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let xdg = home.join(".config");
+    std::fs::create_dir_all(&xdg).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("XDG_CONFIG_HOME", &xdg);
+
+    let root = home.join("panel-wp");
+
+    // (a) Proyecto vivo: tiene config.json → debe quedar EXCLUIDO del listado.
+    let vivo = root.join("vivo");
+    std::fs::create_dir_all(vivo.join("app").join("public")).unwrap();
+    std::fs::write(
+        vivo.join("config.json"),
+        serde_json::to_string_pretty(&site_config("vivo-id", "Vivo", &vivo)).unwrap(),
+    )
+    .unwrap();
+
+    // (b) Desconectado con config conservada + dump → preserved, hasDump=true.
+    let pres = root.join("preservado");
+    std::fs::create_dir_all(pres.join("app").join("public")).unwrap();
+    std::fs::create_dir_all(pres.join("app").join("sql")).unwrap();
+    std::fs::write(pres.join("app").join("sql").join("db-1.sql"), "-- dump\n").unwrap();
+    std::fs::write(
+        pres.join(config::DISCONNECTED_CONFIG),
+        serde_json::to_string_pretty(&site_config("pres-id", "Cliente Preservado", &pres)).unwrap(),
+    )
+    .unwrap();
+
+    // (c) Carpeta vieja sin config, con wp-config.php → reconstructed.
+    let recon = root.join("reconstruido");
+    let pub_c = recon.join("app").join("public");
+    std::fs::create_dir_all(&pub_c).unwrap();
+    std::fs::write(
+        pub_c.join("wp-config.php"),
+        "<?php\ndefine( 'DB_NAME', 'mi_db_legacy' );\n",
+    )
+    .unwrap();
+
+    // -- listar --
+    let list = config::list_disconnected_sites().expect("list");
+    assert_eq!(list.len(), 2, "vivo excluido; preservado + reconstruido listados");
+    let pres_item = list.iter().find(|d| d.folder_name == "preservado").expect("preservado");
+    assert_eq!(pres_item.kind, "preserved");
+    assert!(pres_item.has_dump, "preservado tiene dump");
+    assert_eq!(pres_item.name, "Cliente Preservado");
+    let recon_item = list.iter().find(|d| d.folder_name == "reconstruido").expect("reconstruido");
+    assert_eq!(recon_item.kind, "reconstructed");
+    assert!(!recon_item.has_dump);
+
+    // -- importar el preservado --
+    let app = mock();
+    let res = crate::import_disconnected(app.handle(), "preservado").expect("import");
+    assert!(res.site.migration_pending, "queda pendiente de migración");
+    assert_eq!(res.site.id, "pres-id", "id conservado (no colisiona)");
+    assert!(pres.join("config.json").exists(), "config.json restaurado");
+    assert!(!pres.join(config::DISCONNECTED_CONFIG).exists(), "sidecar eliminado");
+
+    // -- importar el reconstruido: dbName deducido de wp-config.php --
+    let res2 = crate::import_disconnected(app.handle(), "reconstruido").expect("import recon");
+    assert!(res2.site.migration_pending);
+    assert_eq!(res2.site.services.db.db_name, "mi_db_legacy");
+    assert!(recon.join("config.json").exists());
+}
+
+/// SiteConfig mínimo para fixtures de los tests herméticos.
+fn site_config(id: &str, name: &str, path: &std::path::Path) -> SiteConfig {
+    SiteConfig {
+        id: id.into(),
+        name: name.into(),
+        path: path.to_string_lossy().into_owned(),
+        domain: format!("{}.test", id),
+        group: None,
+        created_at: "2026-01-01T00:00:00Z".into(),
+        services: Services {
+            php: PhpService { version: "8.3".into() },
+            nginx: NginxService { ssl: true },
+            db: DbService {
+                db_type: DbType::Mysql,
+                version: "8.0".into(),
+                db_name: format!("{}_db", id.replace('-', "_")),
+            },
+        },
+        github: GithubConfig::default(),
+        one_click_admin: true,
+        xdebug_enabled: false,
+        headless: false,
+        frontend_framework: None,
+        minio: false,
+        migration_pending: false,
+        last_migrated_at: None,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Con Docker
 // ---------------------------------------------------------------------------
 

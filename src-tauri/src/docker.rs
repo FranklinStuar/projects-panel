@@ -673,7 +673,7 @@ impl DockerManager {
     }
 
     /// Apaga servicios compartidos que ya no necesita ningún proyecto activo.
-    async fn teardown_unused_shared(
+    pub(crate) async fn teardown_unused_shared(
         &self,
         stopped: &SiteConfig,
         all: &[SiteConfig],

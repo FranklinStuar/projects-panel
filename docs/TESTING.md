@@ -52,6 +52,7 @@ módulos privados). Cada uno usa nombres `zztest-*` y limpia lo suyo.
 | Test | Docker | Qué hace |
 |--|--|--|
 | `import_localwp_hermetico` | **No** | Monta un `HOME` temporal con `sites.json` + un sitio LocalWP falso, llama `localwp::import_site`, comprueba el `config.json` `migrationPending=true`, la copia de `app/public` y del dump (`imported.sql`). Totalmente aislado. |
+| `list_e_import_disconnected_hermetico` | **No** | Monta `panel-wp/` temporal con un proyecto vivo (excluido), uno desconectado (`config.disconnected.json` + dump) y una carpeta sin config (`wp-config.php`). Verifica `list_disconnected_sites` (preserved/reconstructed, `hasDump`) e `import_disconnected` (restaura `config.json` `migrationPending=true`, quita el sidecar, deduce `dbName`). |
 | `db_lifecycle_idempotente` | Sí | `ensure_db` + `create_database` dos veces (idempotente); la DB compartida queda arriba. |
 | `crear_exportar_migrar_e2e` | Sí | `create_site` real (descarga WordPress, 1ª vez construye `panel-php`) → `export_db` → `rotate_dumps` → `migrate_site`; al final apaga y borra el proyecto. |
 
@@ -121,10 +122,13 @@ NORMAL (sin mock) en el 1420, Playwright lo reutiliza y los tests fallan sin
 datos. Cierra cualquier `vite dev` previo antes de correr los e2e.
 
 Specs en `e2e/` (un escenario por archivo): `dashboard`, `migrate`,
-`cancel-import`, `settings`, `new-site`, `a11y`.
+`cancel-import`, `delete-site`, `import-project`, `settings`, `new-site`, `a11y`.
 
 Notas para escribir specs:
-- Los `confirm()` se aprueban con `page.on('dialog', (d) => d.accept())`.
+- Los `confirm()` se aprueban con `page.on('dialog', (d) => d.accept())`. El
+  borrado de proyecto **no** usa `confirm()` nativo sino un modal propio
+  (`role="dialog"`): scopea los botones con `page.getByRole('dialog')` para no
+  chocar con los botones homónimos de las tarjetas.
 - Usa `{ exact: true }` en nombres de rol que sean subcadena de otros
   (`Encender` casa con `Migrar y encender`; `Proyectos` con el enlace
   `← Proyectos`).
@@ -206,6 +210,17 @@ LocalWP: «Proyecto Viejo» (importable) y «Sitio Importado» (ya importado).
 | ✔ | Checklist: Docker/Red ✓, Wrappers/Plasmoid ✗ (fixtures) |
 | ✔ | Endpoint con badge «puerto alterno» |
 | 2 | Click «Instalar» en Wrappers WP-CLI → pasa a ✓ |
+
+### C.7 Re-importar proyecto desconectado
+
+| Paso | Acción |
+|--|--|
+| 1 | En el dashboard click «Importar proyecto» |
+| ✔ | El modal lista «Cliente Antiguo» (config conservada · con dump) y «sitio-copiado» (reconstruido · sin dump) |
+| 2 | Click «Importar» en «Cliente Antiguo» |
+| ✔ | La consola muestra el progreso y «✓ … re-importado»; «Cerrar» se habilita |
+| 3 | Cerrar la consola y el modal |
+| ✔ | «Cliente Antiguo» aparece en Proyectos como pendiente de migración («Migrar y encender») |
 
 > En modo mock no hay IPC ni Docker reales (todo son fixtures). Para validar el
 > flujo end-to-end de verdad usa `pnpm tauri dev` + los tests `#[ignore]` de §A.2.

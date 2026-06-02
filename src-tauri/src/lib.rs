@@ -146,10 +146,18 @@ async fn migrate_site(app: AppHandle, id: String) -> CmdResult<migrate::Migratio
 }
 
 /// Borra un proyecto: lo apaga (si corre), quita su container y vhost, y elimina
-/// su carpeta de `~/panel-wp/`. Pensado para cancelar una importación con el
-/// proyecto equivocado (aún sin migrar), pero sirve para cualquier proyecto.
+/// la base de datos del servidor compartido («borra todos los datos»).
+///
+/// `delete_folder` decide qué pasa con la carpeta de `~/panel-wp/`:
+/// - `true`  → se borra entera (no queda nada en disco).
+/// - `false` → se conserva, pero se quita su `config.json` para que el panel la
+///   olvide (queda «desconectada»). Los archivos (app/public, conf, dumps en
+///   app/sql) siguen en disco para poder reconfigurar el proyecto más tarde.
+///
+/// Pensado también para cancelar una importación con el proyecto equivocado.
 #[tauri::command]
-async fn delete_site(id: String) -> CmdResult<()> {
+async fn delete_site(app: AppHandle, id: String, delete_folder: bool) -> CmdResult<()> {
+    use crate::progress::log;
     let all = config::load_all_sites().map_err(e)?;
     let site = all
         .iter()
@@ -157,13 +165,167 @@ async fn delete_site(id: String) -> CmdResult<()> {
         .cloned()
         .ok_or_else(|| format!("proyecto {id} no encontrado"))?;
     let docker = DockerManager::connect().map_err(e)?;
-    // Apaga + quita vhost + teardown de compartidos (no-op si está pendiente).
+    // Apaga + exporta dump fresco a app/sql + quita vhost + teardown de
+    // compartidos (no-op si está pendiente).
+    log(&app, "Apagando el proyecto y quitando su vhost…");
     docker.stop_site(&site, &all).await.ok();
     // Asegura que no quede el container php creado.
     docker.remove_container(&site.container_name()).await.ok();
-    // Borra la carpeta del proyecto (fuente de verdad).
-    std::fs::remove_dir_all(&site.path).map_err(e)?;
+    // Borra la base de datos del servidor compartido (datos del proyecto). Hay
+    // que levantar el container de DB para ejecutar el DROP; luego se vuelve a
+    // apagar si ningún otro proyecto activo lo usa.
+    log(
+        &app,
+        format!(
+            "Borrando la base de datos «{}» del servidor compartido…",
+            site.services.db.db_name
+        ),
+    );
+    if let Ok(db_container) = docker.ensure_db(&site.services.db).await {
+        wordpress::drop_database(&docker, &db_container, &site).await.ok();
+    }
+    docker.teardown_unused_shared(&site, &all).await.ok();
+
+    if delete_folder {
+        // Borra la carpeta del proyecto entera.
+        log(&app, "Borrando la carpeta del proyecto del disco…");
+        std::fs::remove_dir_all(&site.path).map_err(e)?;
+    } else {
+        // Desconecta: en vez de borrar la config, la renombra a un sidecar
+        // (`config.disconnected.json`). `load_all_sites()` solo escanea
+        // `config.json`, así que el panel la olvida; pero la metadata se
+        // conserva para re-importar el proyecto sin pérdida más tarde (otra PC,
+        // tras formatear…). Ver `import_disconnected_site`.
+        log(
+            &app,
+            "Desconectando el proyecto del panel (se conserva la carpeta y su configuración para reimportar)…",
+        );
+        let cfg = std::path::Path::new(&site.path).join("config.json");
+        let sidecar = config::disconnected_config_path(&site.path);
+        std::fs::rename(&cfg, &sidecar).map_err(e)?;
+    }
     Ok(())
+}
+
+/// Lista las carpetas de `~/panel-wp/` que ya no están registradas en el panel
+/// pero siguen en disco (proyectos desconectados, copiados de otra PC, etc.),
+/// candidatas a re-importar.
+#[tauri::command]
+fn list_disconnected_sites() -> CmdResult<Vec<config::DisconnectedSite>> {
+    config::list_disconnected_sites().map_err(e)
+}
+
+/// Re-importa una carpeta desconectada al panel: restaura su `config.json`
+/// (desde el sidecar `config.disconnected.json`, o reconstruido best-effort si
+/// no lo hay) y la deja como `migrationPending`. El usuario la enciende luego
+/// con «Migrar y encender», que recrea la DB e importa el último dump.
+#[tauri::command]
+async fn import_disconnected_site(
+    app: AppHandle,
+    folder_name: String,
+) -> CmdResult<localwp::ImportResult> {
+    import_disconnected(&app, &folder_name).map_err(e)
+}
+
+/// Núcleo de `import_disconnected_site`, genérico sobre el runtime para poder
+/// ejercitarlo en tests con `tauri::test::mock_app()`. Devuelve `anyhow::Result`.
+fn import_disconnected<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    folder_name: &str,
+) -> anyhow::Result<localwp::ImportResult> {
+    use crate::progress::log;
+    use anyhow::anyhow;
+
+    // Resolver la ruta bajo ~/panel-wp/ y validar que es un proyecto en disco.
+    let root = config::projects_root()?;
+    let dir = root.join(folder_name);
+    if !dir.is_dir() {
+        return Err(anyhow!("no existe la carpeta {folder_name} en panel-wp"));
+    }
+    if dir.join("config.json").exists() {
+        return Err(anyhow!("«{folder_name}» ya está en el panel"));
+    }
+    let path = dir.to_string_lossy().into_owned();
+    if !dir.join("app").join("public").exists() {
+        return Err(anyhow!(
+            "la carpeta {folder_name} no contiene app/public (no es un proyecto del panel)"
+        ));
+    }
+
+    log(app, format!("▶ Re-importando «{folder_name}»…"));
+
+    let existing = config::load_all_sites()?;
+    let sidecar = config::disconnected_config_path(&path);
+
+    let mut site = if sidecar.exists() {
+        log(app, "• Restaurando la configuración conservada…");
+        let mut cfg = config::read_site_config(&sidecar)?;
+        // La carpeta pudo moverse (otra PC, otra ruta): fijar la ruta actual.
+        cfg.path = path.clone();
+        cfg
+    } else {
+        log(app, "• Sin configuración conservada: reconstruyendo (best-effort)…");
+        reconstruct_config(folder_name, &dir)
+    };
+
+    // Evitar colisión de id con un proyecto vivo (carpeta copiada/duplicada).
+    if existing.iter().any(|s| s.id == site.id) {
+        site.id = uuid::Uuid::new_v4().to_string();
+    }
+    // Queda pendiente: la DB se crea/importa con «Migrar y encender».
+    site.migration_pending = true;
+    site.last_migrated_at = None;
+
+    config::write_site_config(&site)?;
+    // Quitar el sidecar: ya hay config.json (fuente de verdad).
+    if sidecar.exists() {
+        std::fs::remove_file(&sidecar).ok();
+    }
+
+    log(
+        app,
+        format!("✓ «{}» re-importado → usa «Migrar y encender» en Proyectos.", site.name),
+    );
+    Ok(localwp::ImportResult { site, note: None })
+}
+
+/// Reconstruye un `SiteConfig` best-effort para una carpeta sin sidecar: nombre
+/// = carpeta, dominio `{folder}.test`, `dbName` deducido de `wp-config.php` (o
+/// del slug), versiones por defecto. Queda `migrationPending`.
+fn reconstruct_config(folder_name: &str, dir: &std::path::Path) -> SiteConfig {
+    use config::{DbService, DbType, GithubConfig, NginxService, PhpService, Services};
+
+    let slug = wordpress::slugify(folder_name);
+    let db_name = std::fs::read_to_string(dir.join("app").join("public").join("wp-config.php"))
+        .ok()
+        .and_then(|raw| config::parse_db_name(&raw))
+        .unwrap_or_else(|| format!("{}_db", slug.replace('-', "_")));
+
+    SiteConfig {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: folder_name.to_string(),
+        path: dir.to_string_lossy().into_owned(),
+        domain: format!("{slug}.test"),
+        group: None,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        services: Services {
+            php: PhpService { version: "8.3".into() },
+            nginx: NginxService { ssl: true },
+            db: DbService {
+                db_type: DbType::Mysql,
+                version: "8.0".into(),
+                db_name,
+            },
+        },
+        github: GithubConfig::default(),
+        one_click_admin: true,
+        xdebug_enabled: false,
+        headless: false,
+        frontend_framework: None,
+        minio: false,
+        migration_pending: true,
+        last_migrated_at: None,
+    }
 }
 
 /// Lista los sitios de LocalWP candidatos a importar.
@@ -555,6 +717,8 @@ pub fn run() {
             delete_site,
             list_localwp_sites,
             import_localwp_site,
+            list_disconnected_sites,
+            import_disconnected_site,
             open_admin,
             repair_autologin,
             open_site,

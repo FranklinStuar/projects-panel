@@ -17,6 +17,7 @@ import {
   systemStatus,
   initialSites,
   initialLocalSites,
+  initialDisconnectedSites,
   makeSite,
   wpVersions
 } from './fixtures';
@@ -26,6 +27,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // Estado mutable en memoria (se reinicia al recargar la página).
 let sites = initialSites();
 let localSites = initialLocalSites();
+let disconnectedSites = initialDisconnectedSites();
 const status = { ...systemStatus };
 
 function find(id: string): SiteState | undefined {
@@ -59,6 +61,8 @@ export function installMockIpc() {
         return wpVersions;
       case 'list_localwp_sites':
         return localSites.map((l) => ({ ...l }));
+      case 'list_disconnected_sites':
+        return disconnectedSites.map((d) => ({ ...d }));
       case 'gh_status':
         return { installed: true, authenticated: false, user: null };
       case 'gh_scan':
@@ -130,6 +134,33 @@ export function installMockIpc() {
         });
         sites = [...sites, { config: cfg, status: 'migrationPending' }];
         if (lw) lw.alreadyImported = true;
+        return { site: cfg, note: null } satisfies ImportResult;
+      }
+
+      // --- re-importar carpeta desconectada (emite progreso) ---
+      case 'import_disconnected_site': {
+        const folderName = args.folderName as string;
+        const d = disconnectedSites.find((x) => x.folderName === folderName);
+        await progress([
+          `▶ Re-importando «${folderName}»…`,
+          d?.kind === 'preserved'
+            ? '• Restaurando la configuración conservada…'
+            : '• Sin configuración conservada: reconstruyendo (best-effort)…',
+          `✓ «${d?.name ?? folderName}» re-importado → usa «Migrar y encender» en Proyectos.`
+        ]);
+        const cfg = makeSite({
+          id: `reimported-${folderName}`,
+          name: d?.name ?? folderName,
+          migrationPending: true
+        });
+        if (d) {
+          cfg.domain = d.domain;
+          cfg.services.php.version = d.phpVersion;
+          cfg.services.db.version = d.dbVersion;
+          cfg.services.db.type = d.dbType;
+        }
+        sites = [...sites, { config: cfg, status: 'migrationPending' }];
+        disconnectedSites = disconnectedSites.filter((x) => x.folderName !== folderName);
         return { site: cfg, note: null } satisfies ImportResult;
       }
 

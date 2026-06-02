@@ -214,6 +214,27 @@ estado, pero no había forma de migrar ni de exportar la DB al apagar.
   panel (`fix_site_url`) para que el admin funcione aunque el dump venga de
   `*.local`. Limitación (sin `search-replace`) documentada en `KNOWN_ISSUES.md`.
 
+### Re-importar proyectos desconectados (carpeta conservada)
+
+- **Conservar la config al desconectar**: `delete_site` con `deleteFolder=false`
+  ya no borra `config.json`, lo **renombra** a `config.disconnected.json`. Así la
+  carpeta queda fuera del panel (`load_all_sites()` solo escanea `config.json`)
+  pero sin perder metadata (id, dominio, versiones, `dbName`).
+- **`config.rs`**: `list_disconnected_sites()` escanea `~/panel-wp/` y devuelve
+  las carpetas sin `config.json`: con sidecar (`preserved`) o, en su defecto, con
+  `app/public/wp-config.php` (`reconstructed`, con `dbName` parseado por
+  `parse_db_name`). Struct `DisconnectedSite` (espejo en `types.ts`).
+- **Comandos** (`lib.rs`): `list_disconnected_sites` e `import_disconnected_site`
+  (núcleo genérico `import_disconnected<R>` testeable con mock). El import
+  restaura/reconstruye `config.json` con `migrationPending=true`, regenera el id
+  si colisiona con un proyecto vivo, fija la ruta actual (carpeta movida/copiada)
+  y borra el sidecar. La DB se materializa luego con «Migrar y encender».
+- **Frontend**: botón «Importar proyecto» en el dashboard → `ImportProjectModal.svelte`
+  (lista + badge `config conservada`/`reconstruido` + con/sin dump, progreso en
+  `OpConsole`). Mock (`fixtures`/`mock-ipc`) y e2e `import-project.spec.ts`.
+- **Test**: `integration_tests::list_e_import_disconnected_hermetico` (hermético,
+  sin Docker): lista preserved+reconstructed (excluye el vivo) e importa ambos.
+
 ### Empaquetado del plasmoid
 
 - **`scripts/package-plasmoid.sh`** (nuevo): genera `dist/wordpress-panel.plasmoid`
@@ -441,6 +462,39 @@ la DB a medio importar (corrupta) si se mataba la app. Tres cambios en
   «Pull todo», y formulario de clonado con selector de categoría + ruta custom
   opcional. `api.ghScan`/`ghRegister`/`openVscode`; `ghClone` acepta `path?`,
   `ghRemove` ya no necesita `kind`.
+
+## Borrar proyecto (con opción de conservar la carpeta)
+
+Botón **"Eliminar"** en el dashboard (cada tarjeta) y en la vista de proyecto,
+para cualquier proyecto (no solo importaciones pendientes — eso ya lo cubría
+"Cancelar").
+
+- **Siempre borra todos los datos**: apaga + quita container/vhost + **`DROP
+  DATABASE`** del esquema del proyecto en el servidor de DB compartido
+  (`wordpress::drop_database`, nuevo — antes `delete_site` dejaba el esquema
+  vivo). Tras el drop, `teardown_unused_shared` re-apaga el container de DB si
+  ningún otro activo lo usa.
+- **Modal de confirmación propio** (`DeleteProjectModal.svelte`, no el `confirm()`
+  nativo que mostraba la URL de localhost como título): titula con el **nombre**
+  del proyecto y trae un **checkbox** "Borrar también la carpeta del proyecto en
+  disco" — una sola pantalla en vez de dos diálogos encadenados.
+  - **Marcado** → `remove_dir_all` de la carpeta del proyecto.
+  - **Sin marcar** → conserva la carpeta y solo elimina su `config.json`, así el
+    panel la olvida (queda "desconectada"); `app/public`, `conf` y los dumps de
+    `app/sql` siguen en disco para reconfigurarla más tarde. `stop_site` deja un
+    dump fresco antes de apagar.
+- **Consola con ventana de gracia**: al confirmar se abre la `OpConsole` (la misma
+  de migración/import) con una cuenta atrás de **5 s** ("Preparando proceso de
+  eliminación…") y un botón **«Cancelar borrado»**. Si se cancela a tiempo, no se
+  toca nada. Pasados los 5 s desaparece el botón de cancelar y se procede; al
+  terminar se habilita **«Cerrar»**. `delete_site` emite sus pasos (apagar, DROP
+  de la DB, borrar/desconectar carpeta) por el canal `op-log`.
+- **API**: `delete_site` pasa de `(id)` a `(id, deleteFolder)` (+ `AppHandle` para
+  emitir progreso); `api.deleteSite` espejo. "Cancelar importación" sigue llamando
+  con `deleteFolder=true` (borra todo, como antes).
+- **Tests**: `e2e/delete-site.spec.ts` cubre las cuatro ramas (modal + cancelar,
+  borrar solo datos, abortar en la gracia, borrar también la carpeta). Suite e2e
+  completa: 16/16.
 
 ## Fase 4+ — Pendiente
 
