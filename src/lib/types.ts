@@ -78,6 +78,10 @@ export interface SnapshotMeta {
   createdAt: string;
   dbName: string;
   dbType: DbType;
+  /** Bytes del code.tar.zst; 0 en snapshots antiguos. */
+  codeBytes: number;
+  /** Bytes del db.sql; 0 en snapshots antiguos. */
+  dbBytes: number;
 }
 
 /// Espejo de `config::Endpoint`: dónde publica el panel en el host.

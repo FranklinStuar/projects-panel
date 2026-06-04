@@ -578,11 +578,16 @@ async fn feature_stub(feature: String) -> CmdResult<String> {
 // -- Fase 5: clones temporales + puntos de guardado --------------------------
 
 /// Crea un punto de guardado del proyecto (tar del código + dump SQL).
+/// Emite progreso por `op-log`.
 #[tauri::command]
-async fn create_snapshot(id: String, label: String) -> CmdResult<snapshot::SnapshotMeta> {
+async fn create_snapshot(
+    app: AppHandle,
+    id: String,
+    label: String,
+) -> CmdResult<snapshot::SnapshotMeta> {
     let site = load_site(&id)?;
     let docker = DockerManager::connect().map_err(e)?;
-    snapshot::create_snapshot(&docker, &site, &label).await.map_err(e)
+    snapshot::create_snapshot(&app, &docker, &site, &label).await.map_err(e)
 }
 
 /// Lista los puntos de guardado del proyecto (más reciente primero).

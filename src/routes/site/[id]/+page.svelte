@@ -25,9 +25,20 @@
   let showSnapshotForm = $state(false);
   let snapshotLabel = $state('');
   let snapshotBusy = $state(false);
+  // Consola de progreso al crear snapshot
+  let snapshotConsoleOpen = $state(false);
+  let snapshotRunning = $state(false);
   // Clone en curso (OpConsole)
   let cloneConsoleOpen = $state(false);
   let cloning = $state(false);
+
+  function fmtBytes(b: number): string {
+    if (b <= 0) return '';
+    if (b >= 1_073_741_824) return `${(b / 1_073_741_824).toFixed(1)} GB`;
+    if (b >= 1_048_576) return `${(b / 1_048_576).toFixed(1)} MB`;
+    if (b >= 1_024) return `${Math.round(b / 1_024)} KB`;
+    return `${b} B`;
+  }
 
   async function loadSnapshots() {
     snapshotsLoading = true;
@@ -44,6 +55,8 @@
   async function createSnapshot() {
     if (!snapshotLabel.trim()) return;
     snapshotBusy = true;
+    snapshotRunning = true;
+    snapshotConsoleOpen = true;
     snapshotsError = null;
     try {
       await api.createSnapshot(id, snapshotLabel.trim());
@@ -54,6 +67,7 @@
       snapshotsError = String(err);
     } finally {
       snapshotBusy = false;
+      snapshotRunning = false;
     }
   }
 
@@ -748,6 +762,17 @@
                 {new Date(snap.createdAt).toLocaleString()}
                 · {snap.dbType} · {snap.dbName}
               </div>
+              {#if snap.codeBytes > 0 || snap.dbBytes > 0}
+                <div class="mt-0.5 flex gap-3 text-xs text-zinc-400">
+                  {#if snap.codeBytes > 0}
+                    <span title="Código comprimido (code.tar.zst)">código {fmtBytes(snap.codeBytes)}</span>
+                  {/if}
+                  {#if snap.dbBytes > 0}
+                    <span title="Dump de base de datos (db.sql)">BD {fmtBytes(snap.dbBytes)}</span>
+                  {/if}
+                  <span class="font-medium text-zinc-300">total {fmtBytes(snap.codeBytes + snap.dbBytes)}</span>
+                </div>
+              {/if}
             </div>
             <div class="flex shrink-0 gap-2">
               {#if !site.config.cloneOf}
@@ -776,6 +801,7 @@
 {/if}
 
 <OpConsole open={consoleOpen} running={migrating} title="Migración" onClose={() => (consoleOpen = false)} />
+<OpConsole open={snapshotConsoleOpen} running={snapshotRunning} title="Punto de guardado" onClose={() => (snapshotConsoleOpen = false)} />
 <OpConsole open={cloneConsoleOpen} running={cloning} title="Crear clone" onClose={() => (cloneConsoleOpen = false)} />
 
 <DeleteProjectModal bind:site={deleteTarget} onClose={(deleted) => deleted && goto('/')} />
