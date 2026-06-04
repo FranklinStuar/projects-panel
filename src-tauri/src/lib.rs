@@ -3,6 +3,7 @@
 mod autologin;
 mod backup;
 mod cli;
+mod clone;
 mod config;
 mod dbus;
 mod docker;
@@ -15,6 +16,7 @@ mod netcheck;
 mod nginx;
 mod php;
 mod progress;
+mod snapshot;
 mod ssl;
 mod system;
 mod wordpress;
@@ -325,6 +327,7 @@ fn reconstruct_config(folder_name: &str, dir: &std::path::Path) -> SiteConfig {
         minio: false,
         migration_pending: true,
         last_migrated_at: None,
+        clone_of: None,
     }
 }
 
@@ -572,6 +575,43 @@ async fn feature_stub(feature: String) -> CmdResult<String> {
     ))
 }
 
+// -- Fase 5: clones temporales + puntos de guardado --------------------------
+
+/// Crea un punto de guardado del proyecto (tar del código + dump SQL).
+#[tauri::command]
+async fn create_snapshot(id: String, label: String) -> CmdResult<snapshot::SnapshotMeta> {
+    let site = load_site(&id)?;
+    let docker = DockerManager::connect().map_err(e)?;
+    snapshot::create_snapshot(&docker, &site, &label).await.map_err(e)
+}
+
+/// Lista los puntos de guardado del proyecto (más reciente primero).
+#[tauri::command]
+fn list_snapshots(id: String) -> CmdResult<Vec<snapshot::SnapshotMeta>> {
+    let site = load_site(&id)?;
+    snapshot::list_snapshots(&site).map_err(e)
+}
+
+/// Borra un punto de guardado del disco.
+#[tauri::command]
+fn delete_snapshot(id: String, snapshot_id: String) -> CmdResult<()> {
+    let site = load_site(&id)?;
+    snapshot::delete_snapshot(&site, &snapshot_id).map_err(e)
+}
+
+/// Crea un clone temporal desde un punto de guardado. Emite progreso por `op-log`.
+#[tauri::command]
+async fn create_clone(
+    app: AppHandle,
+    parent_id: String,
+    snapshot_id: String,
+) -> CmdResult<SiteConfig> {
+    let docker = DockerManager::connect().map_err(e)?;
+    clone::create_clone(&app, &docker, &parent_id, &snapshot_id)
+        .await
+        .map_err(e)
+}
+
 fn load_site(id: &str) -> CmdResult<SiteConfig> {
     config::find_site(id)
         .map_err(e)?
@@ -744,7 +784,11 @@ pub fn run() {
             open_mailpit,
             open_minio,
             open_adminer,
-            feature_stub
+            feature_stub,
+            create_snapshot,
+            list_snapshots,
+            delete_snapshot,
+            create_clone
         ])
         .run(tauri::generate_context!())
         .expect("error al arrancar la aplicación Tauri");
