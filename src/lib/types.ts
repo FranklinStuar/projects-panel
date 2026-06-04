@@ -44,6 +44,14 @@ export interface DetectedRepo {
   registered: boolean;
 }
 
+/** Espejo de `config::CloneInfo`: metadatos del proyecto padre. */
+export interface CloneInfo {
+  parentId: string;
+  parentDirname: string;
+  snapshotId: string;
+  createdAt: string;
+}
+
 export interface SiteConfig {
   id: string;
   name: string;
@@ -60,6 +68,16 @@ export interface SiteConfig {
   minio: boolean;
   migrationPending: boolean;
   lastMigratedAt: string | null;
+  cloneOf?: CloneInfo | null;
+}
+
+/** Espejo de `snapshot::SnapshotMeta`. */
+export interface SnapshotMeta {
+  id: string;
+  label: string;
+  createdAt: string;
+  dbName: string;
+  dbType: DbType;
 }
 
 /// Espejo de `config::Endpoint`: dónde publica el panel en el host.

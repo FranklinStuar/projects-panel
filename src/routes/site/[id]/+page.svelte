@@ -4,18 +4,89 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { api } from '$lib/api';
-  import type { SiteState, GhStatus, DetectedRepo, Endpoint } from '$lib/types';
+  import type { SiteState, GhStatus, DetectedRepo, Endpoint, SnapshotMeta } from '$lib/types';
   import OpConsole from '$lib/components/OpConsole.svelte';
   import DeleteProjectModal from '$lib/components/DeleteProjectModal.svelte';
 
   let site = $state<SiteState | null>(null);
   let endpoint = $state<Endpoint | null>(null);
   let notFound = $state(false);
-  let tab = $state<'info' | 'logs' | 'ext' | 'github' | 'svc'>('info');
+  let tab = $state<'info' | 'logs' | 'ext' | 'github' | 'svc' | 'snapshots'>('info');
   let error = $state<string | null>(null);
   let busy = $state(false);
   let consoleOpen = $state(false);
   let migrating = $state(false);
+
+  // --- Clones temporales / puntos de guardado --------------------------------
+  let snapshots = $state<SnapshotMeta[]>([]);
+  let snapshotsLoading = $state(false);
+  let snapshotsError = $state<string | null>(null);
+  // Formulario inline "Punto de guardado"
+  let showSnapshotForm = $state(false);
+  let snapshotLabel = $state('');
+  let snapshotBusy = $state(false);
+  // Clone en curso (OpConsole)
+  let cloneConsoleOpen = $state(false);
+  let cloning = $state(false);
+
+  async function loadSnapshots() {
+    snapshotsLoading = true;
+    snapshotsError = null;
+    try {
+      snapshots = await api.listSnapshots(id);
+    } catch (err) {
+      snapshotsError = String(err);
+    } finally {
+      snapshotsLoading = false;
+    }
+  }
+
+  async function createSnapshot() {
+    if (!snapshotLabel.trim()) return;
+    snapshotBusy = true;
+    snapshotsError = null;
+    try {
+      await api.createSnapshot(id, snapshotLabel.trim());
+      snapshotLabel = '';
+      showSnapshotForm = false;
+      await loadSnapshots();
+    } catch (err) {
+      snapshotsError = String(err);
+    } finally {
+      snapshotBusy = false;
+    }
+  }
+
+  async function deleteSnapshot(snapshotId: string) {
+    if (!confirm('¿Borrar este punto de guardado? No se puede deshacer.')) return;
+    snapshotsError = null;
+    try {
+      await api.deleteSnapshot(id, snapshotId);
+      await loadSnapshots();
+    } catch (err) {
+      snapshotsError = String(err);
+    }
+  }
+
+  async function cloneFromSnapshot(snapshotId: string) {
+    const snap = snapshots.find((s) => s.id === snapshotId);
+    if (!snap) return;
+    if (!confirm(`¿Crear un clone temporal desde «${snap.label}»?\nSe creará un proyecto nuevo basado en ese punto de guardado.`)) return;
+    cloning = true;
+    cloneConsoleOpen = true;
+    try {
+      const cloneSite = await api.createClone(id, snapshotId);
+      await goto(`/site/${cloneSite.id}`);
+    } catch (err) {
+      error = String(err);
+    } finally {
+      cloning = false;
+    }
+  }
+
+  $effect(() => {
+    if (tab === 'snapshots') loadSnapshots();
+  });
 
   const id = page.params.id as string;
 
@@ -271,7 +342,8 @@
     { id: 'logs', label: 'Logs' },
     { id: 'ext', label: 'Plugins / Themes' },
     { id: 'github', label: 'GitHub' },
-    { id: 'svc', label: 'Servicios' }
+    { id: 'svc', label: 'Servicios' },
+    { id: 'snapshots', label: 'Puntos de guardado' }
   ] as const;
 </script>
 
@@ -282,7 +354,12 @@
 
   <div class="mb-4 flex items-center justify-between">
     <div>
-      <h1 class="text-lg font-semibold">{site.config.name}</h1>
+      <div class="flex items-center gap-2">
+        <h1 class="text-lg font-semibold">{site.config.name}</h1>
+        {#if site.config.cloneOf}
+          <span class="rounded border border-amber-400 px-1.5 py-0.5 text-xs font-medium text-amber-500">Clone temporal</span>
+        {/if}
+      </div>
       <p class="text-sm text-zinc-500">{hostLabel(site)}</p>
     </div>
     <div class="flex items-center gap-2">
@@ -327,6 +404,15 @@
         >
           {busy ? '…' : site.status === 'running' ? 'Detener' : 'Encender'}
         </button>
+        {#if !site.config.cloneOf}
+          <button
+            class="rounded bg-zinc-200 px-3 py-1.5 text-sm dark:bg-zinc-800"
+            onclick={() => { tab = 'snapshots'; showSnapshotForm = true; }}
+            title="Crear un punto de guardado del estado actual"
+          >
+            Punto de guardado
+          </button>
+        {/if}
         <button
           class="rounded px-3 py-1.5 text-sm font-medium text-zinc-400 hover:text-red-500 disabled:opacity-50"
           disabled={busy}
@@ -600,11 +686,96 @@
           disabled={svcBusy} onclick={() => svcAction(() => api.featureStub(key))}>{label}</button>
       {/each}
     </div>
+  {:else if tab === 'snapshots'}
+    <!-- Puntos de guardado -->
+    {#if snapshotsError}
+      <div class="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">{snapshotsError}</div>
+    {/if}
+
+    <!-- Formulario para crear nuevo punto de guardado (solo si no es un clone) -->
+    {#if !site.config.cloneOf}
+      <div class="mb-4">
+        {#if showSnapshotForm}
+          <div class="flex items-center gap-2 rounded border border-zinc-200 px-3 py-2 dark:border-zinc-800">
+            <input
+              class="flex-1 rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              placeholder="Etiqueta del punto de guardado…"
+              bind:value={snapshotLabel}
+              onkeydown={(e) => e.key === 'Enter' && createSnapshot()}
+              autofocus
+            />
+            <button
+              class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              disabled={snapshotBusy || !snapshotLabel.trim()}
+              onclick={createSnapshot}
+            >
+              {snapshotBusy ? '…' : 'Guardar'}
+            </button>
+            <button
+              class="rounded px-2 py-1.5 text-sm text-zinc-400 hover:text-zinc-600"
+              onclick={() => { showSnapshotForm = false; snapshotLabel = ''; }}
+            >
+              ✕
+            </button>
+          </div>
+        {:else}
+          <button
+            class="rounded bg-zinc-200 px-3 py-1.5 text-sm dark:bg-zinc-800"
+            onclick={() => (showSnapshotForm = true)}
+          >
+            + Nuevo punto de guardado
+          </button>
+        {/if}
+      </div>
+    {:else}
+      <p class="mb-4 text-sm text-zinc-500">
+        Los puntos de guardado se crean en el proyecto original, no en el clone.
+      </p>
+    {/if}
+
+    <!-- Lista de snapshots -->
+    {#if snapshotsLoading}
+      <p class="text-sm text-zinc-500">Cargando…</p>
+    {:else if snapshots.length === 0}
+      <p class="text-sm text-zinc-500">No hay puntos de guardado todavía.</p>
+    {:else}
+      <div class="flex flex-col gap-2">
+        {#each snapshots as snap (snap.id)}
+          <div class="flex items-center justify-between gap-3 rounded border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+            <div class="min-w-0">
+              <div class="font-medium">{snap.label}</div>
+              <div class="text-xs text-zinc-500">
+                {new Date(snap.createdAt).toLocaleString()}
+                · {snap.dbType} · {snap.dbName}
+              </div>
+            </div>
+            <div class="flex shrink-0 gap-2">
+              {#if !site.config.cloneOf}
+                <button
+                  class="rounded bg-amber-600 px-2 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                  disabled={cloning}
+                  onclick={() => cloneFromSnapshot(snap.id)}
+                >
+                  Clonar desde aquí
+                </button>
+              {/if}
+              <button
+                class="rounded px-2 py-1.5 text-xs text-red-500 hover:text-red-700"
+                onclick={() => deleteSnapshot(snap.id)}
+              >
+                Borrar
+              </button>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
   {/if}
 {:else}
   <p class="text-sm text-zinc-500">Cargando…</p>
 {/if}
 
 <OpConsole open={consoleOpen} running={migrating} title="Migración" onClose={() => (consoleOpen = false)} />
+<OpConsole open={cloneConsoleOpen} running={cloning} title="Crear clone" onClose={() => (cloneConsoleOpen = false)} />
 
 <DeleteProjectModal bind:site={deleteTarget} onClose={(deleted) => deleted && goto('/')} />
