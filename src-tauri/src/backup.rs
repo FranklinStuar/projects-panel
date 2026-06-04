@@ -7,13 +7,14 @@
 
 use anyhow::{anyhow, Result};
 use chrono::Utc;
+use std::path::Path;
 
 use crate::config::SiteConfig;
 use crate::docker::{db_container_name, DockerManager};
 
-/// Exporta la DB del proyecto a `app/sql/db-{timestamp}.sql`.
-/// Devuelve la ruta del archivo generado.
-pub async fn export_db(docker: &DockerManager, site: &SiteConfig) -> Result<String> {
+/// Exporta la DB del proyecto a `dest`. Ruta arbitraria; el directorio padre
+/// debe existir o crearse antes de llamar. Necesita el engine DB corriendo.
+pub async fn export_db_to(docker: &DockerManager, site: &SiteConfig, dest: &Path) -> Result<()> {
     let db_container = db_container_name(&site.services.db);
     if !docker.is_running(&db_container).await {
         return Err(anyhow!(
@@ -21,7 +22,6 @@ pub async fn export_db(docker: &DockerManager, site: &SiteConfig) -> Result<Stri
             site.name
         ));
     }
-
     let dbname = &site.services.db.db_name;
     let dump = docker
         .exec_capture(
@@ -39,13 +39,18 @@ pub async fn export_db(docker: &DockerManager, site: &SiteConfig) -> Result<Stri
     if dump.is_empty() {
         return Err(anyhow!("mysqldump no produjo salida para {dbname}"));
     }
+    std::fs::write(dest, &dump)?;
+    Ok(())
+}
 
+/// Exporta la DB del proyecto a `app/sql/db-{timestamp}.sql`.
+/// Devuelve la ruta del archivo generado.
+pub async fn export_db(docker: &DockerManager, site: &SiteConfig) -> Result<String> {
     let stamp = Utc::now().format("%Y%m%d-%H%M%S").to_string();
     let sql_dir = site.sql_dir();
     std::fs::create_dir_all(&sql_dir).ok();
     let dest = sql_dir.join(format!("db-{stamp}.sql"));
-    std::fs::write(&dest, &dump)?;
-
+    export_db_to(docker, site, &dest).await?;
     Ok(dest.to_string_lossy().to_string())
 }
 
@@ -109,6 +114,7 @@ mod tests {
             minio: false,
             migration_pending: false,
             last_migrated_at: None,
+            clone_of: None,
         }
     }
 

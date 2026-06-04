@@ -294,6 +294,7 @@ fn site_config(id: &str, name: &str, path: &std::path::Path) -> SiteConfig {
         minio: false,
         migration_pending: false,
         last_migrated_at: None,
+        clone_of: None,
     }
 }
 
@@ -333,6 +334,7 @@ async fn db_lifecycle_idempotente() {
         minio: false,
         migration_pending: false,
         last_migrated_at: None,
+        clone_of: None,
     };
 
     let db_container = docker.ensure_db(&cfg.services.db).await.expect("ensure_db");

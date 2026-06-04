@@ -179,7 +179,7 @@ fn latest_dump(site: &SiteConfig) -> Option<PathBuf> {
 }
 
 /// Fija `home`/`siteurl` al dominio del panel (el dump pudo traer otro dominio).
-async fn fix_site_url(docker: &DockerManager, site: &SiteConfig) -> Result<()> {
+pub(crate) async fn fix_site_url(docker: &DockerManager, site: &SiteConfig) -> Result<()> {
     let url = crate::config::endpoint_or_default().site_url(&site.domain, site.services.nginx.ssl);
     for opt in ["home", "siteurl"] {
         crate::wpcli::run(
@@ -240,7 +240,7 @@ const IMPORT_PREAMBLE: &[u8] =
     b"SET autocommit=0;\nSET unique_checks=0;\nSET foreign_key_checks=0;\n";
 const IMPORT_EPILOGUE: &[u8] = b"\nCOMMIT;\n";
 
-async fn import_dump<R: Runtime>(
+pub(crate) async fn import_dump<R: Runtime>(
     app: &AppHandle<R>,
     docker: &DockerManager,
     site: &SiteConfig,

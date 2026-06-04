@@ -144,6 +144,7 @@ pub async fn create_site(docker: &DockerManager, req: NewSiteRequest) -> Result<
         minio: req.minio,
         migration_pending: false,
         last_migrated_at: None,
+        clone_of: None,
     };
 
     // 1. estructura de carpetas

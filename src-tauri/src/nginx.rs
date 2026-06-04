@@ -20,7 +20,7 @@ fn vhost_path(site: &SiteConfig) -> Result<PathBuf> {
 }
 
 /// Nombre de la carpeta del proyecto bajo `~/panel-wp/` (= basename de path).
-fn project_dirname(site: &SiteConfig) -> String {
+pub(crate) fn project_dirname(site: &SiteConfig) -> String {
     Path::new(&site.path)
         .file_name()
         .and_then(|s| s.to_str())
@@ -32,13 +32,32 @@ pub fn render_vhost(site: &SiteConfig) -> String {
     let server_name = &site.domain;
     let upstream = format!("{}:9000", site.container_name());
     // nginx ve los archivos en /srv/projects (ro); php los ve en /var/www/html.
-    let root = format!("/srv/projects/{}/app/public", project_dirname(site));
+    let dirname = project_dirname(site);
+    let root = format!("/srv/projects/{dirname}/app/public");
+
+    // Para clones: uploads nuevos en el clone (rw), uploads viejos del padre ro vía fallback.
+    let uploads_block = if let Some(ref ci) = site.clone_of {
+        let parent = &ci.parent_dirname;
+        format!(
+            r#"
+    location ^~ /wp-content/uploads/ {{
+        root /srv/projects/{dirname}/app/public;
+        try_files $uri @uploads_base;
+    }}
+    location @uploads_base {{
+        root /srv/projects/{parent}/app/public;
+        try_files $uri =404;
+    }}
+"#
+        )
+    } else {
+        String::new()
+    };
 
     let mut conf = String::new();
 
     if site.services.nginx.ssl {
-        // El cert vive en la carpeta del proyecto, visible por nginx en /srv/projects.
-        let ssl_base = format!("/srv/projects/{}/ssl", project_dirname(site));
+        let ssl_base = format!("/srv/projects/{dirname}/ssl");
         conf.push_str(&format!(
             r#"server {{
     listen 80;
@@ -59,8 +78,7 @@ server {{
 
     location / {{
         try_files $uri $uri/ /index.php?$args;
-    }}
-
+    }}{uploads_block}
     location ~ \.php$ {{
         fastcgi_pass {upstream};
         fastcgi_index index.php;
@@ -88,8 +106,7 @@ server {{
 
     location / {{
         try_files $uri $uri/ /index.php?$args;
-    }}
-
+    }}{uploads_block}
     location ~ \.php$ {{
         fastcgi_pass {upstream};
         fastcgi_index index.php;
@@ -114,6 +131,85 @@ pub fn write_vhost(site: &SiteConfig) -> Result<()> {
     std::fs::write(&path, render_vhost(site))
         .with_context(|| format!("escribiendo vhost {:?}", path))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{
+        CloneInfo, DbService, DbType, GithubConfig, NginxService, PhpService, Services,
+    };
+
+    fn base_site(ssl: bool) -> SiteConfig {
+        SiteConfig {
+            id: "abc".into(),
+            name: "Demo".into(),
+            path: "/home/u/panel-wp/demo".into(),
+            domain: "demo.test".into(),
+            group: None,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            services: Services {
+                php: PhpService { version: "8.3".into() },
+                nginx: NginxService { ssl },
+                db: DbService {
+                    db_type: DbType::Mysql,
+                    version: "8.0".into(),
+                    db_name: "demo_db".into(),
+                },
+            },
+            github: GithubConfig::default(),
+            one_click_admin: true,
+            xdebug_enabled: false,
+            headless: false,
+            frontend_framework: None,
+            minio: false,
+            migration_pending: false,
+            last_migrated_at: None,
+            clone_of: None,
+        }
+    }
+
+    #[test]
+    fn vhost_normal_sin_uploads_block() {
+        let site = base_site(false);
+        let conf = render_vhost(&site);
+        assert!(!conf.contains("uploads_base"), "no-clone no debe tener @uploads_base");
+        assert!(conf.contains("server_name demo.test"), "falta server_name");
+    }
+
+    #[test]
+    fn vhost_clone_incluye_uploads_fallback_http() {
+        let mut site = base_site(false);
+        site.path = "/home/u/panel-wp/demo-clone".into();
+        site.domain = "demo-clone.test".into();
+        site.clone_of = Some(CloneInfo {
+            parent_id: "parent1".into(),
+            parent_dirname: "demo".into(),
+            snapshot_id: "snap1".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+        });
+        let conf = render_vhost(&site);
+        assert!(conf.contains("@uploads_base"), "clone http debe tener @uploads_base");
+        assert!(conf.contains("/srv/projects/demo-clone/app/public"), "debe tener ruta del clone");
+        assert!(conf.contains("/srv/projects/demo/app/public"), "debe tener ruta del padre");
+        assert!(conf.contains("^~ /wp-content/uploads/"), "debe tener location ^~");
+    }
+
+    #[test]
+    fn vhost_clone_incluye_uploads_fallback_ssl() {
+        let mut site = base_site(true);
+        site.path = "/home/u/panel-wp/demo-clone".into();
+        site.domain = "demo-clone.test".into();
+        site.clone_of = Some(CloneInfo {
+            parent_id: "parent1".into(),
+            parent_dirname: "demo".into(),
+            snapshot_id: "snap1".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+        });
+        let conf = render_vhost(&site);
+        assert!(conf.contains("@uploads_base"), "clone ssl debe tener @uploads_base");
+        assert!(conf.contains("listen 443 ssl"), "debe tener SSL");
+    }
 }
 
 pub fn remove_vhost(site: &SiteConfig) -> Result<()> {

@@ -11,7 +11,8 @@ import type {
   Migration,
   LocalSite,
   ImportResult,
-  DisconnectedSite
+  DisconnectedSite,
+  SnapshotMeta
 } from './types';
 
 // Capa fina sobre los comandos IPC de Tauri (src-tauri/src/lib.rs).
@@ -74,5 +75,13 @@ export const api = {
   openMailpit: () => invoke<void>('open_mailpit'),
   openMinio: () => invoke<void>('open_minio'),
   openAdminer: (id: string) => invoke<void>('open_adminer', { id }),
-  featureStub: (feature: string) => invoke<string>('feature_stub', { feature })
+  featureStub: (feature: string) => invoke<string>('feature_stub', { feature }),
+  // Fase 5: clones temporales + puntos de guardado
+  createSnapshot: (id: string, label: string) =>
+    invoke<SnapshotMeta>('create_snapshot', { id, label }),
+  listSnapshots: (id: string) => invoke<SnapshotMeta[]>('list_snapshots', { id }),
+  deleteSnapshot: (id: string, snapshotId: string) =>
+    invoke<void>('delete_snapshot', { id, snapshotId }),
+  createClone: (parentId: string, snapshotId: string) =>
+    invoke<SiteConfig>('create_clone', { parentId, snapshotId })
 };

@@ -181,6 +181,9 @@
                 class:bg-amber-500={s.status === 'migrationPending'}
               ></span>
               <a href={`/site/${s.config.id}`} class="font-medium hover:underline">{s.config.name}</a>
+              {#if s.config.cloneOf}
+                <span class="rounded border border-amber-400 px-1 py-0.5 text-xs font-medium text-amber-500">Clone</span>
+              {/if}
               <span class="text-xs text-zinc-500">{hostLabel(s)}</span>
               <span class="text-xs text-zinc-400">
                 PHP {s.config.services.php.version} · {s.config.services.db.type} {s.config.services.db.version}
