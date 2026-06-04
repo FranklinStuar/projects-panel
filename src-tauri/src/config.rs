@@ -71,6 +71,16 @@ pub struct Services {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloneInfo {
+    pub parent_id: String,
+    /// Basename de `path` del padre — nginx.rs lo usa para la ruta de uploads.
+    pub parent_dirname: String,
+    pub snapshot_id: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GithubRepo {
     pub repo: String,
     pub branch: String,
@@ -132,6 +142,9 @@ pub struct SiteConfig {
     pub migration_pending: bool,
     #[serde(default)]
     pub last_migrated_at: Option<String>,
+    /// Poblado si este sitio es un clone temporal de otro.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clone_of: Option<CloneInfo>,
 }
 
 impl SiteConfig {
@@ -507,6 +520,7 @@ mod tests {
             minio: false,
             migration_pending: true,
             last_migrated_at: None,
+            clone_of: None,
         }
     }
 
@@ -561,6 +575,30 @@ mod tests {
         let v = serde_json::to_value(&gh).unwrap();
         assert!(v.get("theme").is_none(), "theme no debe serializarse: {v}");
         assert!(v.get("plugins").is_none(), "plugins no debe serializarse: {v}");
+    }
+
+    #[test]
+    fn clone_info_serializa_en_camelcase() {
+        let info = CloneInfo {
+            parent_id: "p1".into(),
+            parent_dirname: "mysite".into(),
+            snapshot_id: "s1".into(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        let v = serde_json::to_value(&info).unwrap();
+        assert!(v.get("parentId").is_some(), "falta parentId: {v}");
+        assert!(v.get("parentDirname").is_some(), "falta parentDirname: {v}");
+        assert!(v.get("snapshotId").is_some(), "falta snapshotId: {v}");
+
+        // clone_of=Some se serializa; clone_of=None se omite.
+        let mut s = site();
+        s.clone_of = Some(info);
+        let v = serde_json::to_value(&s).unwrap();
+        assert!(v.get("cloneOf").is_some(), "falta cloneOf cuando Some: {v}");
+
+        let s2 = site(); // clone_of=None
+        let v2 = serde_json::to_value(&s2).unwrap();
+        assert!(v2.get("cloneOf").is_none(), "cloneOf debe omitirse cuando None: {v2}");
     }
 
     #[test]

@@ -184,6 +184,7 @@ pub fn import_site<R: Runtime>(app: &AppHandle<R>, local_id: &str) -> Result<Imp
         // Aparece pendiente: la DB se crea/importa al "Migrar y encender".
         migration_pending: true,
         last_migrated_at: None,
+        clone_of: None,
     };
 
     // Estructura + copia de archivos.
