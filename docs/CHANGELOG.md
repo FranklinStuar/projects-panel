@@ -565,6 +565,18 @@ ordenado. Dos arreglos independientes:
   `stop_site`/`stop_all_sites` (el stop ya hace el export-al-detener final).
 - `backup.rs`: extraído `dump_bytes` (captura en memoria) reusado por el export a
   disco y por el auto-dump.
+- **Fixes tras prueba en vivo**:
+  - `db_has_volume` exige `source == db-data/{container}` del host, no solo el
+    destino: el volumen anónimo que la imagen mysql crea por su `VOLUME` declarado
+    pasaba como "ya durable" y se saltaba la migración (ese volumen sobrevive al
+    reinicio pero se queda huérfano al recrear el container → probable causa de la
+    pérdida de datos original).
+  - `mysqldump --skip-dump-date`: la línea `-- Dump completed on <fecha>` cambiaba
+    en cada volcado y rompía el dedup por hash (volcaba/logueaba aunque la DB no
+    cambiara).
+  - Auto-dump siembra su línea base desde el último dump en disco (`latest_dump_hash`),
+    no desde el estado vivo: una edición hecha al arrancar (o con el panel cerrado)
+    se detecta y vuelca en el primer sondeo en vez de absorberse silenciosamente.
 - **Log de volcados** (`dumplog.rs`): cada dump escrito en `app/sql/` (auto, al
   detener o manual) queda registrado en `config_dir/dump-log.jsonl` (`DumpLogEntry`:
   timestamp, sitio, base de datos, ruta, bytes, origen) para revisarlo y comparar.

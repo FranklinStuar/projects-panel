@@ -59,7 +59,10 @@ async fn watch(site: SiteConfig) {
     let db_container = db_container_name(&site.services.db);
 
     let mut last_writes: Option<u64> = None;
-    let mut last_hash: Option<u64> = None;
+    // Línea base sembrada desde el último dump en disco (no desde el estado vivo):
+    // si la DB cambió mientras el panel estaba cerrado o justo al arrancar, el
+    // primer sondeo lo detecta y lo vuelca, en vez de tragárselo silenciosamente.
+    let mut last_hash: Option<u64> = latest_dump_hash(&site);
 
     loop {
         tokio::time::sleep(POLL).await;
@@ -83,19 +86,37 @@ async fn watch(site: SiteConfig) {
         };
         let hash = hash_bytes(&dump);
 
-        match last_hash {
-            // Primer sondeo: fija la línea base sin escribir (el dump del último
-            // stop ya refleja este estado).
-            None => last_hash = Some(hash),
-            Some(prev) if prev == hash => {}
-            Some(_) => {
-                last_hash = Some(hash);
-                if let Err(err) = persist(&site, &dump) {
-                    eprintln!("auto-dump de '{}' falló: {err}", site.name);
-                }
-            }
+        // Igual al último dump persistido → nada cambió, no escribir.
+        if last_hash == Some(hash) {
+            continue;
+        }
+        last_hash = Some(hash);
+        if let Err(err) = persist(&site, &dump) {
+            eprintln!("auto-dump de '{}' falló: {err}", site.name);
         }
     }
+}
+
+/// Hash del dump `db-*.sql` más reciente en `app/sql/` (la última foto que
+/// persistimos), para sembrar la línea base. `None` si no hay ninguno.
+fn latest_dump_hash(site: &SiteConfig) -> Option<u64> {
+    let dir = site.sql_dir();
+    let newest = std::fs::read_dir(&dir)
+        .ok()?
+        .flatten()
+        .filter(|e| {
+            let n = e.file_name();
+            let n = n.to_string_lossy();
+            n.starts_with("db-") && n.ends_with(".sql")
+        })
+        .filter_map(|e| {
+            let m = e.metadata().ok()?.modified().ok()?;
+            Some((m, e.path()))
+        })
+        .max_by_key(|(m, _)| *m)?
+        .1;
+    let bytes = std::fs::read(&newest).ok()?;
+    Some(hash_bytes(&bytes))
 }
 
 /// Escribe un dump nuevo en `app/sql/db-{timestamp}.sql`, lo registra en el log

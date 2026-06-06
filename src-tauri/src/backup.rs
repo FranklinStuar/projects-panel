@@ -33,6 +33,10 @@ pub async fn dump_bytes(docker: &DockerManager, site: &SiteConfig) -> Result<Vec
                 "-ppanel",
                 "--single-transaction",
                 "--no-tablespaces",
+                // Sin la línea `-- Dump completed on <fecha>`: cambia en cada
+                // volcado y rompería el dedup por hash del auto-dump (volcaría y
+                // loguearía aunque la DB no haya cambiado). Ver autodump.rs.
+                "--skip-dump-date",
                 dbname,
             ],
         )
