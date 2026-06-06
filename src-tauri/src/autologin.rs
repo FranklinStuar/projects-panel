@@ -15,8 +15,14 @@ use uuid::Uuid;
 
 use crate::config::SiteConfig;
 use crate::docker::DockerManager;
+use crate::wordpress;
 
-pub async fn open_admin(app: &AppHandle, docker: &DockerManager, site: &SiteConfig) -> Result<()> {
+pub async fn open_admin(
+    app: &AppHandle,
+    docker: &DockerManager,
+    site: &SiteConfig,
+    user_id: Option<u64>,
+) -> Result<()> {
     if !docker.is_running(&site.container_name()).await {
         return Err(anyhow!("el proyecto '{}' no está encendido", site.name));
     }
@@ -24,14 +30,19 @@ pub async fn open_admin(app: &AppHandle, docker: &DockerManager, site: &SiteConf
     let base = crate::config::endpoint_or_default().site_url(&site.domain, site.services.nginx.ssl);
 
     let url = if site.one_click_admin {
+        // Garantiza que el mu-plugin en disco sea siempre la versión actual.
+        // Necesario para proyectos creados antes de que se añadiera soporte de user_id.
+        wordpress::inject_autologin_muplugin(site).ok();
+
         let token = Uuid::new_v4().simple().to_string();
         let key = format!("panel_autologin_{token}");
-        // transient de un solo uso, expira en 60s
+        // valor = user_id para login como usuario específico; "0" = primer admin
+        let value = user_id.unwrap_or(0).to_string();
         let args = vec![
             "transient".to_string(),
             "set".to_string(),
             key,
-            "1".to_string(),
+            value,
             "60".to_string(),
         ];
         crate::wpcli::run(docker, site, &args).await?;

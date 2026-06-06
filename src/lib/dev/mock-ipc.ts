@@ -111,6 +111,8 @@ export function installMockIpc() {
         if (s) s.config.oneClickAdmin = true;
         return s ? { ...s.config } : null;
       }
+      case 'repair_all_php_ini':
+        return `php.ini actualizado en ${sites.length}/${sites.length} proyectos. Reinicia los que estén encendidos.`;
 
       // --- cancelar importación (borra el proyecto) ---
       case 'delete_site':
@@ -195,6 +197,12 @@ export function installMockIpc() {
         return null;
       case 'export_db':
         return '/home/u/panel-wp/demo/app/sql/db-2026.sql';
+
+      case 'list_wp_users':
+        return [
+          { ID: '1', user_login: 'admin', display_name: 'Admin', roles: 'administrator' },
+          { ID: '2', user_login: 'editor', display_name: 'Editor User', roles: 'editor' },
+        ];
 
       // --- comandos sin efecto observable en mock ---
       case 'open_admin':

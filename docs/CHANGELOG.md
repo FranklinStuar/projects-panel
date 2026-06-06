@@ -496,6 +496,41 @@ para cualquier proyecto (no solo importaciones pendientes — eso ya lo cubría
   borrar solo datos, abortar en la gracia, borrar también la carpeta). Suite e2e
   completa: 16/16.
 
+## Auto-login con selector de usuario
+
+Rama `feat/autologin-user-select`. El botón «Abrir admin» ahora permite elegir
+con qué usuario de WordPress abrir la sesión, sin necesidad de escribir
+credenciales.
+
+- **Selector de usuario en la UI** (`site/[id]/+page.svelte`): cuando
+  `oneClickAdmin` está activo y el proyecto corre, aparece un `<select>` pegado
+  al botón «Abrir admin» con la lista de usuarios del proyecto. La elección se
+  persiste en `localStorage` (`wp-panel:autologin:<id>`) para esa instalación.
+  Por defecto (opción vacía) se mantiene el comportamiento anterior: primer
+  administrador.
+- **Comando `list_wp_users`** (`lib.rs` + `wpcli`): invoca `wp user list
+  --fields=ID,user_login,display_name,roles --format=json`; tipo `WpUser` en
+  `types.ts`. La lista se carga solo cuando el proyecto está encendido y
+  `oneClickAdmin=true`; fallo silencioso (el selector simplemente no aparece).
+- **`open_admin` acepta `userId?`** (`lib.rs`, `autologin.rs`, `api.ts`): el
+  transient ahora almacena el `user_id` (string numérico). `> 0` → login como
+  ese usuario exacto; `0` / ausente → primer administrador (retrocompatible).
+- **mu-plugin actualizado** (`docker/mu-plugins/panel-autologin.php` +
+  template inline en `wordpress.rs`): lee el valor del transient como `user_id`;
+  si `> 0` hace `get_userdata($user_id)`, si no busca el primer admin. Redirect
+  adaptativo: `admin_url()` si tiene `manage_options`, `home_url('/')` si no.
+  `open_admin` reinyecta el plugin antes de crear el token para proyectos creados
+  antes de esta versión.
+- **OPcache en php.ini** (`docker/php.ini.tmpl`, `wordpress.rs` `DEFAULT_PHP_INI`):
+  se añade `opcache.enable=1 / validate_timestamps=1 / revalidate_freq=0` —
+  activa OPcache con recarga inmediata de cambios en disco (dev local).
+- **Comando `repair_all_php_ini`** (`lib.rs`, `api.ts`): regenera el `php.ini`
+  de todos los proyectos desde el template actual; devuelve resumen OK/errores.
+  Expuesto en la nueva sección **Mantenimiento** de la pantalla de configuración
+  (`settings/+page.svelte`).
+- **Mock IPC** (`mock-ipc.ts`): casos `list_wp_users` y `repair_all_php_ini`
+  para `pnpm dev:mock`.
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).

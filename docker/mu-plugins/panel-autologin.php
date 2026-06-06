@@ -19,20 +19,30 @@ add_action( 'init', function () {
     }
 
     $key = 'panel_autologin_' . $token;
-    if ( get_transient( $key ) === false ) {
+    $stored = get_transient( $key );
+    if ( $stored === false ) {
         return; // token inválido o ya usado
     }
     delete_transient( $key ); // un solo uso
 
-    $admins = get_users( array( 'role' => 'administrator', 'number' => 1 ) );
-    if ( empty( $admins ) ) {
-        return;
+    $user_id = intval( $stored );
+    if ( $user_id > 0 ) {
+        $user = get_userdata( $user_id );
+        if ( ! $user ) {
+            return;
+        }
+    } else {
+        $admins = get_users( array( 'role' => 'administrator', 'number' => 1 ) );
+        if ( empty( $admins ) ) {
+            return;
+        }
+        $user = $admins[0];
     }
-    $user = $admins[0];
 
     wp_set_current_user( $user->ID );
     wp_set_auth_cookie( $user->ID, true );
 
-    wp_safe_redirect( admin_url() );
+    $redirect = user_can( $user->ID, 'manage_options' ) ? admin_url() : home_url( '/' );
+    wp_safe_redirect( $redirect );
     exit;
 } );

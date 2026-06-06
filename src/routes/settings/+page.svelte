@@ -202,6 +202,29 @@
     <p class="mt-2 text-xs text-zinc-500">Tema: navy oscuro (sin selector claro/oscuro).</p>
   </section>
 
+  <!-- Herramientas de mantenimiento -->
+  <section class="mb-6">
+    <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Mantenimiento</h2>
+    <div class="overflow-hidden rounded border border-zinc-800 text-sm">
+      <div class="flex items-center justify-between px-4 py-3">
+        <div>
+          <div class="font-medium">Regenerar php.ini en todos los proyectos</div>
+          <div class="text-xs text-zinc-500">
+            Aplica la configuración actual del panel (OPcache, límites, etc.) a todos los proyectos.
+            Reinicia los proyectos encendidos para que surta efecto.
+          </div>
+        </div>
+        <button
+          class="shrink-0 rounded bg-zinc-800 px-3 py-1.5 disabled:opacity-50"
+          disabled={busy}
+          onclick={() => run(() => api.repairAllPhpIni(), 'php.ini regenerado')}
+        >
+          Aplicar a todos
+        </button>
+      </div>
+    </div>
+  </section>
+
   <!-- Import LocalWP -->
   <section class="mb-6">
     <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Importar desde LocalWP</h2>

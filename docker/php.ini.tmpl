@@ -8,3 +8,8 @@ max_input_vars = 3000
 display_errors = On
 error_reporting = E_ALL & ~E_DEPRECATED & ~E_STRICT
 date.timezone = UTC
+
+; OPcache — dev local: validar timestamps en cada request para ver cambios al instante
+opcache.enable = 1
+opcache.validate_timestamps = 1
+opcache.revalidate_freq = 0

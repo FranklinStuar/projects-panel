@@ -4,7 +4,7 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { api } from '$lib/api';
-  import type { SiteState, GhStatus, DetectedRepo, Endpoint, SnapshotMeta } from '$lib/types';
+  import type { SiteState, GhStatus, DetectedRepo, Endpoint, SnapshotMeta, WpUser } from '$lib/types';
   import OpConsole from '$lib/components/OpConsole.svelte';
   import DeleteProjectModal from '$lib/components/DeleteProjectModal.svelte';
 
@@ -16,6 +16,44 @@
   let busy = $state(false);
   let consoleOpen = $state(false);
   let migrating = $state(false);
+
+  // --- User picker para auto-login ------------------------------------------
+  let wpUsers = $state<WpUser[]>([]);
+  let wpUsersLoaded = $state(false);
+  let wpUsersLoading = $state(false);
+
+  function loadSavedUserId(): string {
+    try {
+      const raw = localStorage.getItem(`wp-panel:autologin:${id}`);
+      if (raw) return JSON.parse(raw).userId ?? '';
+    } catch {}
+    return '';
+  }
+  let selectedUserId = $state(loadSavedUserId());
+
+  function saveUserId(val: string) {
+    selectedUserId = val;
+    localStorage.setItem(`wp-panel:autologin:${id}`, JSON.stringify({ userId: val }));
+  }
+
+  async function loadWpUsers() {
+    if (wpUsersLoaded || wpUsersLoading) return;
+    wpUsersLoading = true;
+    try {
+      wpUsers = await api.listWpUsers(id);
+      wpUsersLoaded = true;
+    } catch {
+      // silent — el select simplemente no aparece
+    } finally {
+      wpUsersLoading = false;
+    }
+  }
+
+  $effect(() => {
+    if (site?.status === 'running' && site.config.oneClickAdmin) {
+      loadWpUsers();
+    }
+  });
 
   // --- Clones temporales / puntos de guardado --------------------------------
   let snapshots = $state<SnapshotMeta[]>([]);
@@ -185,8 +223,9 @@
 
   async function openAdmin() {
     error = null;
+    const userId = selectedUserId ? Number(selectedUserId) : undefined;
     try {
-      await api.openAdmin(id);
+      await api.openAdmin(id, userId);
     } catch (e) {
       error = String(e);
     }
@@ -397,9 +436,24 @@
           <button class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500" onclick={openSite}>
             Abrir web
           </button>
-          <button class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500" onclick={openAdmin}>
-            Abrir admin
-          </button>
+          <div class="flex items-center gap-0.5">
+            <button class="rounded-l bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500" onclick={openAdmin}>
+              Abrir admin
+            </button>
+            {#if site.config.oneClickAdmin}
+              <select
+                class="rounded-r border border-blue-600 bg-blue-600 py-1.5 pl-2 pr-6 text-sm font-medium text-white hover:bg-blue-500 focus:outline-none dark:border-blue-600"
+                value={selectedUserId}
+                onchange={(e) => saveUserId((e.target as HTMLSelectElement).value)}
+                title="Usuario para auto-login"
+              >
+                <option value="">Primer admin</option>
+                {#each wpUsers as u}
+                  <option value={u.ID}>{u.display_name} ({u.user_login})</option>
+                {/each}
+              </select>
+            {/if}
+          </div>
         {/if}
         <button
           class="rounded bg-zinc-200 px-3 py-1.5 text-sm font-medium dark:bg-zinc-800"
@@ -805,3 +859,4 @@
 <OpConsole open={cloneConsoleOpen} running={cloning} title="Crear clone" onClose={() => (cloneConsoleOpen = false)} />
 
 <DeleteProjectModal bind:site={deleteTarget} onClose={(deleted) => deleted && goto('/')} />
+
