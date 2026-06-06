@@ -98,7 +98,7 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `wordpress.rs` | `create_site` end-to-end, `download_core` (tarball), `fetch_versions` (API wp.org, cache 24h), DB/wp-config/install vía WP-CLI. `sync_mu_plugins`: (re)inyecta los mu-plugins del panel (mailpit siempre + auto-login si `oneClickAdmin`); idempotente, lo usan `create_site`, `migrate` y `repair_autologin`. |
 | `wpcli.rs` | `run()` WP-CLI dentro del container del proyecto, como `www-data` (WP-CLI rechaza root). |
 | `logs.rs` | `spawn_stream`: sigue (`follow`) los logs del container y los emite como evento `log:{id}`. Cancelable vía `JoinHandle::abort()`. |
-| `autologin.rs` | `open_admin`: token efímero (transient WP, 60s, un solo uso) + abre navegador; el mu-plugin `panel-autologin.php` valida y loguea al admin. El mu-plugin lo inyecta `wordpress::sync_mu_plugins` al crear/migrar; `repair_autologin` lo reinyecta en proyectos viejos (import LocalWP) que no lo traían. |
+| `autologin.rs` | `open_admin`: token efímero (transient WP, 60s, un solo uso) + abre navegador; el mu-plugin `panel-autologin.php` valida y loguea al usuario. El transient almacena el `user_id` destino: `> 0` = ese usuario exacto, `0` = primer administrador (retrocompatible). Llama `wordpress::inject_autologin_muplugin` antes de crear el token para garantizar la versión actual del plugin aunque el proyecto se creara antes. El mu-plugin lo inyecta `wordpress::sync_mu_plugins` al crear/migrar; `repair_autologin` lo reinyecta en proyectos viejos. Redirect: admin WP si tiene `manage_options`, home si no. |
 | `github.rs` | `gh`/`git` en el HOST (no container, los archivos están bind-montados): `status`, `clone`, `pull`, `remove_dir`, `propose_path`. `scan` autodetecta repos git bajo wp-content (`DetectedRepo`); `read_repo_meta` lee remoto/rama de un huérfano; `open_vscode` + `ensure_workspace` (genera `.code-workspace` multi-root, una vez). Repos en `github.repos` (lista genérica; `GithubConfig::normalize` pliega el legacy theme/plugins). Sin auth propia. |
 | `ssl.rs` | `generate`: cert/key por dominio con mkcert en `ssl/` del proyecto. La CA local (`mkcert -install`) se hace una vez en `first-run.sh`. |
 | `dbus.rs` | Servidor D-Bus (zbus) para el plasmoid KDE; arranca en el `setup` de Tauri. Ver sección D-Bus. |
@@ -134,8 +134,10 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `import_localwp_site` | `id` | `ImportResult` | Importa un sitio de LocalWP (queda `migrationPending`). |
 | `list_disconnected_sites` | — | `Vec<DisconnectedSite>` | Carpetas de `~/panel-wp/` desconectadas (sin `config.json`): con `config.disconnected.json` (`preserved`) o con `app/public/wp-config.php` (`reconstructed`). |
 | `import_disconnected_site` | `folderName` | `ImportResult` | Re-importa una carpeta desconectada: restaura/reconstruye `config.json` y la deja `migrationPending`. Emite `op-log`. |
-| `open_admin` | `id` | `()` | Abre el admin en el navegador (auto-login si está activo). |
+| `open_admin` | `id`, `userId?` | `()` | Abre el admin en el navegador (auto-login si está activo). `userId` = ID de usuario WP destino; omitir o `0` = primer administrador. |
+| `list_wp_users` | `id` | `Vec<WpUser>` | Lista usuarios WP del proyecto (`ID`, `user_login`, `display_name`, `roles`). Requiere proyecto encendido. |
 | `repair_autologin` | `id` | `SiteConfig` | Activa `oneClickAdmin` y reinyecta los mu-plugins del panel (auto-login + mailpit). Para proyectos importados de LocalWP sin el plugin. No requiere proyecto encendido. |
+| `repair_all_php_ini` | — | `String` | Regenera el `php.ini` de todos los proyectos desde el template actual (aplica cambios como OPcache). Devuelve resumen de éxito/errores. Los proyectos deben reiniciarse para que surta efecto. |
 | `stream_logs` | `id` | `()` | Inicia el stream de logs → eventos `log:{id}`. |
 | `stop_logs` | `id` | `()` | Detiene el stream de logs. |
 | `list_plugins` | `id` | `String` (JSON) | `wp plugin list`. |
