@@ -1,5 +1,6 @@
 //! Panel WP — backend Tauri.
 
+mod autodump;
 mod autologin;
 mod backup;
 mod cli;
@@ -8,6 +9,7 @@ mod config;
 mod dbus;
 mod docker;
 mod domain;
+mod dumplog;
 mod github;
 mod localwp;
 mod logs;
@@ -28,9 +30,10 @@ mod integration_tests;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use tokio::task::JoinHandle;
 
+use autodump::AutoDump;
 use config::{SiteConfig, SiteState};
 use docker::DockerManager;
 use wordpress::{NewSiteRequest, WpVersion};
@@ -59,31 +62,37 @@ async fn get_sites() -> CmdResult<Vec<SiteState>> {
 }
 
 #[tauri::command]
-async fn start_site(id: String) -> CmdResult<()> {
+async fn start_site(autodump: State<'_, AutoDump>, id: String) -> CmdResult<()> {
     let site = config::find_site(&id)
         .map_err(e)?
         .ok_or_else(|| format!("proyecto {id} no encontrado"))?;
     let docker = DockerManager::connect().map_err(e)?;
-    docker.start_site(&site).await.map_err(e)
+    docker.start_site(&site).await.map_err(e)?;
+    // Auto-dump: a partir de aquí cada cambio en la DB deja un dump fresco.
+    autodump.start(site);
+    Ok(())
 }
 
 #[tauri::command]
-async fn stop_site(id: String) -> CmdResult<()> {
+async fn stop_site(autodump: State<'_, AutoDump>, id: String) -> CmdResult<()> {
     let all = config::load_all_sites().map_err(e)?;
     let site = all
         .iter()
         .find(|s| s.id == id)
         .cloned()
         .ok_or_else(|| format!("proyecto {id} no encontrado"))?;
+    // Parar el watcher antes del stop: el propio stop ya exporta el dump final.
+    autodump.stop(&id);
     let docker = DockerManager::connect().map_err(e)?;
     docker.stop_site(&site, &all).await.map_err(e)
 }
 
 #[tauri::command]
-async fn stop_all_sites() -> CmdResult<()> {
+async fn stop_all_sites(autodump: State<'_, AutoDump>) -> CmdResult<()> {
     let all = config::load_all_sites().map_err(e)?;
     let docker = DockerManager::connect().map_err(e)?;
     for site in &all {
+        autodump.stop(&site.id);
         docker.stop_site(site, &all).await.ok();
     }
     Ok(())
@@ -539,7 +548,22 @@ async fn set_site_minio(id: String, enabled: bool) -> CmdResult<SiteConfig> {
 async fn export_db(id: String) -> CmdResult<String> {
     let site = load_site(&id)?;
     let docker = DockerManager::connect().map_err(e)?;
-    backup::export_db(&docker, &site).await.map_err(e)
+    let path = backup::export_db(&docker, &site).await.map_err(e)?;
+    dumplog::append(&site, &path, "manual").ok();
+    Ok(path)
+}
+
+/// Devuelve el log de volcados de DB (más nuevos primero) para revisión.
+#[tauri::command]
+async fn dump_log() -> CmdResult<Vec<dumplog::DumpLogEntry>> {
+    dumplog::read_all().map_err(e)
+}
+
+/// Limpia el log de volcados por fecha (`before`, ISO `YYYY-MM-DD`) y/o por base
+/// de datos (`dbName`). Sin filtros borra todo. Devuelve cuántas se eliminaron.
+#[tauri::command]
+async fn clean_dump_log(before: Option<String>, db_name: Option<String>) -> CmdResult<usize> {
+    dumplog::clean(before.as_deref(), db_name.as_deref()).map_err(e)
 }
 
 /// Instala los wrappers WP-CLI (`wp`, `wordpress-panel-cli`) en `~/.local/bin`.
@@ -766,6 +790,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .manage(LogStreams::default())
+        .manage(AutoDump::default())
         .setup(|app| {
             // Instala los wrappers WP-CLI (`wp`, `wordpress-panel-cli`) una vez al
             // arrancar. Son globales del usuario (en ~/.local/bin) y detectan el
@@ -775,6 +800,25 @@ pub fn run() {
             if let Err(err) = cli::install_cli_wrapper() {
                 eprintln!("no se pudieron instalar los wrappers WP-CLI: {err}");
             }
+
+            // Auto-dump para proyectos que ya estaban activos al abrir el panel
+            // (containers que sobrevivieron a la sesión anterior). Los que se
+            // arranquen luego enganchan su watcher en `start_site`.
+            let autodump_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let Ok(docker) = DockerManager::connect() else {
+                    return;
+                };
+                let Ok(sites) = config::load_all_sites() else {
+                    return;
+                };
+                let state = autodump_handle.state::<AutoDump>();
+                for site in sites {
+                    if docker.is_running(&site.container_name()).await {
+                        state.start(site);
+                    }
+                }
+            });
 
             // Servidor D-Bus para el plasmoid KDE. Si la sesión D-Bus no está
             // disponible, el panel sigue funcionando igual (solo sin widget).
@@ -831,6 +875,8 @@ pub fn run() {
             set_site_group,
             set_site_minio,
             export_db,
+            dump_log,
+            clean_dump_log,
             install_cli_wrapper,
             open_mailpit,
             open_minio,

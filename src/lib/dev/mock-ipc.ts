@@ -197,6 +197,29 @@ export function installMockIpc() {
         return null;
       case 'export_db':
         return '/home/u/panel-wp/demo/app/sql/db-2026.sql';
+      case 'dump_log':
+        return [
+          {
+            timestamp: '2026-06-06T10:30:00Z',
+            siteId: 'demo',
+            siteName: 'Demo',
+            dbName: 'demo_wp',
+            file: '/home/u/panel-wp/demo/app/sql/db-20260606-103000.sql',
+            bytes: 1048576,
+            source: 'auto',
+          },
+          {
+            timestamp: '2026-06-05T18:00:00Z',
+            siteId: 'demo',
+            siteName: 'Demo',
+            dbName: 'demo_wp',
+            file: '/home/u/panel-wp/demo/app/sql/db-20260605-180000.sql',
+            bytes: 1040000,
+            source: 'stop',
+          },
+        ];
+      case 'clean_dump_log':
+        return 0;
 
       case 'list_wp_users':
         return [

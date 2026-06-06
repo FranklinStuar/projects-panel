@@ -76,10 +76,23 @@ scripts/                 first-run.sh, wp-wrapper.sh, wordpress-panel-cli.sh
 - **Fuente de verdad de proyectos** = el `config.json` en cada carpeta de
   `~/panel-wp/`. No hay base de datos central; `load_all_sites()` escanea.
 - **Docker solo vía bollard** en runtime (`DockerManager`). Excepciones (CLI
-  `docker`): build de la imagen php (`docker build`, `php.rs`) e import del dump
+  `docker`): build de la imagen php (`docker build`, `php.rs`), import del dump
   en migración (`docker exec -i … mysql`, `migrate::import_dump`) — el `exec` con
   stdin adjunto de bollard se cuelga con dumps grandes (su stream de salida no
-  cierra al terminar el proceso).
+  cierra al terminar el proceso) — y la migración una-sola-vez de la DB a volumen
+  durable (`docker cp`, `DockerManager::migrate_db_to_volume`): extraer un dir por
+  el stream tar de bollard es complejo; `cp` lo hace en un paso.
+- **Datos de la DB son durables**: el container DB compartido bindea su datadir a
+  `config_dir/db-data/{container}` (`docker.rs::db_data_dir` + `DbType::datadir`).
+  Sobreviven recreado del container y apagón. NO volver a crear DBs sin bind.
+- **Auto-dump** (`autodump.rs`): cada proyecto activo deja un dump fresco en
+  `app/sql/` cuando cambia su DB (gate por `Innodb_rows_*` + hash del volcado).
+  Watcher = estado Tauri `AutoDump`; se engancha en `start_site`/`setup` y se
+  aborta en `stop_site`. El `stop_site` ya hace el export-al-detener final.
+- **Log de volcados** (`dumplog.rs`, `config_dir/dump-log.jsonl`): toda escritura
+  de dump (auto/stop/manual) se registra vía `dumplog::append(site, file, source)`.
+  Comandos `dump_log` / `clean_dump_log`; UI en Configuración. Limpieza solo poda
+  el log, NUNCA los `.sql` (de esos se encarga `rotate_dumps`).
 - **Eventos backend→frontend requieren capability.** Los comandos `#[tauri::command]`
   no pasan por el ACL de Tauri 2, pero `app.emit`/`listen()` usan `core:event`, que
   sí. La capability está en `src-tauri/capabilities/default.json` (autodescubierta).

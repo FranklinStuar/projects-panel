@@ -13,7 +13,8 @@ import type {
   ImportResult,
   DisconnectedSite,
   SnapshotMeta,
-  WpUser
+  WpUser,
+  DumpLogEntry
 } from './types';
 
 // Capa fina sobre los comandos IPC de Tauri (src-tauri/src/lib.rs).
@@ -74,6 +75,10 @@ export const api = {
   setSiteMinio: (id: string, enabled: boolean) =>
     invoke<SiteConfig>('set_site_minio', { id, enabled }),
   exportDb: (id: string) => invoke<string>('export_db', { id }),
+  // Log de volcados de DB: revisar y limpiar
+  dumpLog: () => invoke<DumpLogEntry[]>('dump_log'),
+  cleanDumpLog: (before: string | null, dbName: string | null) =>
+    invoke<number>('clean_dump_log', { before, dbName }),
   installCliWrapper: () => invoke<string>('install_cli_wrapper'),
   openMailpit: () => invoke<void>('open_mailpit'),
   openMinio: () => invoke<void>('open_minio'),
