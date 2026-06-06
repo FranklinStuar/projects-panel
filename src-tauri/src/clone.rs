@@ -53,8 +53,11 @@ async fn run<R: Runtime>(
     let existing = crate::config::load_all_sites()?;
 
     // -- Derivar slug / path / dominio libre -----------------------------------
+    // El nombre y el slug del clone se basan en la etiqueta del punto de guardado.
+    let label_slug = slugify(&meta.label);
+    let base_slug = format!("{parent_dirname}-{label_slug}");
     let (clone_slug, clone_path, clone_domain) =
-        find_free_slot(&root, &parent_dirname, &existing);
+        find_free_slot(&root, &base_slug, &existing);
     let clone_id = Uuid::new_v4().to_string();
     let db_name = format!("{}_db", clone_slug.replace('-', "_"));
 
@@ -69,7 +72,7 @@ async fn run<R: Runtime>(
 
     let site = SiteConfig {
         id: clone_id.clone(),
-        name: format!("{} (clone)", parent.name),
+        name: meta.label.clone(),
         path: clone_path.to_string_lossy().to_string(),
         domain: clone_domain.clone(),
         group: parent.group.clone(),
@@ -178,22 +181,43 @@ async fn run<R: Runtime>(
     Ok(site)
 }
 
+/// Convierte una etiqueta libre en un slug DNS-safe: minúsculas, alfanumérico y
+/// guiones, sin guiones repetidos ni en los extremos. Vacío → "clone".
+fn slugify(label: &str) -> String {
+    let mut out = String::with_capacity(label.len());
+    let mut prev_dash = false;
+    for ch in label.chars() {
+        let c = ch.to_ascii_lowercase();
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    let s = out.trim_matches('-').to_string();
+    if s.is_empty() {
+        "clone".to_string()
+    } else {
+        s
+    }
+}
+
 /// Devuelve (slug, path, domain) libres para el clone (sin colisión de path ni
-/// de dominio con proyectos existentes).
+/// de dominio con proyectos existentes), partiendo de `base`.
 fn find_free_slot(
     root: &Path,
-    parent_dirname: &str,
+    base: &str,
     existing: &[SiteConfig],
 ) -> (String, std::path::PathBuf, String) {
     let existing_domains: std::collections::HashSet<&str> =
         existing.iter().map(|s| s.domain.as_str()).collect();
 
-    let base = format!("{parent_dirname}-clone");
-
     // Probar base, luego base-2, base-3, ...
     for n in 0u32..=99 {
         let slug = if n == 0 {
-            base.clone()
+            base.to_string()
         } else {
             format!("{base}-{n}")
         };
@@ -248,30 +272,39 @@ mod tests {
     #[test]
     fn find_free_slot_base_libre() {
         let tmp = tempfile::tempdir().unwrap();
-        let (slug, path, domain) = find_free_slot(tmp.path(), "mysite", &[]);
-        assert_eq!(slug, "mysite-clone");
-        assert_eq!(path, tmp.path().join("mysite-clone"));
-        assert_eq!(domain, "mysite-clone.test");
+        let (slug, path, domain) = find_free_slot(tmp.path(), "mysite-v1", &[]);
+        assert_eq!(slug, "mysite-v1");
+        assert_eq!(path, tmp.path().join("mysite-v1"));
+        assert_eq!(domain, "mysite-v1.test");
     }
 
     #[test]
     fn find_free_slot_evita_colision_path() {
         let tmp = tempfile::tempdir().unwrap();
         // Crear carpeta base para forzar colisión.
-        std::fs::create_dir(tmp.path().join("mysite-clone")).unwrap();
-        let (slug, _, domain) = find_free_slot(tmp.path(), "mysite", &[]);
-        assert_eq!(slug, "mysite-clone-1");
-        assert_eq!(domain, "mysite-clone-1.test");
+        std::fs::create_dir(tmp.path().join("mysite-v1")).unwrap();
+        let (slug, _, domain) = find_free_slot(tmp.path(), "mysite-v1", &[]);
+        assert_eq!(slug, "mysite-v1-1");
+        assert_eq!(domain, "mysite-v1-1.test");
     }
 
     #[test]
     fn find_free_slot_evita_colision_dominio() {
         let tmp = tempfile::tempdir().unwrap();
-        let existing = vec![mock_site("other", "mysite-clone.test")];
-        let (slug, _, domain) = find_free_slot(tmp.path(), "mysite", &existing);
+        let existing = vec![mock_site("other", "mysite-v1.test")];
+        let (slug, _, domain) = find_free_slot(tmp.path(), "mysite-v1", &existing);
         // Path libre pero domain colisiona → siguiente.
-        assert_eq!(slug, "mysite-clone-1");
-        assert_eq!(domain, "mysite-clone-1.test");
+        assert_eq!(slug, "mysite-v1-1");
+        assert_eq!(domain, "mysite-v1-1.test");
+    }
+
+    #[test]
+    fn slugify_etiquetas() {
+        assert_eq!(slugify("Antes de actualizar"), "antes-de-actualizar");
+        assert_eq!(slugify("  v2.0 / final  "), "v2-0-final");
+        assert_eq!(slugify("¡¡¡"), "clone");
+        assert_eq!(slugify(""), "clone");
+        assert_eq!(slugify("Plugin WooCommerce!!"), "plugin-woocommerce");
     }
 
     #[test]

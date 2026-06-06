@@ -109,13 +109,28 @@
   // Cuántos proyectos están encendidos (señal en "Apagar todo").
   let runningCount = $derived(sites.filter((s) => s.status === 'running').length);
 
-  // Agrupar por grupo (null = "Sin grupo")
+  // Agrupar por grupo (null = "Sin grupo"). Los clones no son entradas de
+  // primer nivel: cuelgan de su proyecto padre como sublista.
+  type Node = { site: SiteState; clones: SiteState[] };
   let groups = $derived.by(() => {
-    const map = new Map<string, SiteState[]>();
+    // Índice padre→clones (por id del padre).
+    const clonesByParent = new Map<string, SiteState[]>();
     for (const s of sites) {
+      const pid = s.config.cloneOf?.parentId;
+      if (!pid) continue;
+      if (!clonesByParent.has(pid)) clonesByParent.set(pid, []);
+      clonesByParent.get(pid)!.push(s);
+    }
+    const byId = new Set(sites.map((s) => s.config.id));
+
+    const map = new Map<string, Node[]>();
+    for (const s of sites) {
+      const pid = s.config.cloneOf?.parentId;
+      // Clone con padre presente → se renderiza anidado, no como nodo suelto.
+      if (pid && byId.has(pid)) continue;
       const key = s.config.group ?? 'Sin grupo';
       if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(s);
+      map.get(key)!.push({ site: s, clones: clonesByParent.get(s.config.id) ?? [] });
     }
     return [...map.entries()];
   });
@@ -167,74 +182,86 @@
     No hay proyectos todavía. Crea uno con <a href="/site/new" class="text-blue-500 underline">Nuevo proyecto</a>.
   </div>
 {:else}
-  {#each groups as [name, items] (name)}
+  {#each groups as [name, nodes] (name)}
     <section class="mb-6">
       <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">{name}</h2>
       <div class="overflow-hidden rounded border border-zinc-200 dark:border-zinc-800">
-        {#each items as s (s.config.id)}
-          <div class="flex items-center justify-between border-b border-zinc-100 px-4 py-3 last:border-0 dark:border-zinc-800/60">
-            <div class="flex items-center gap-3">
-              <span
-                class="inline-block h-2.5 w-2.5 rounded-full"
-                class:bg-green-500={s.status === 'running'}
-                class:bg-zinc-400={s.status === 'stopped'}
-                class:bg-amber-500={s.status === 'migrationPending'}
-              ></span>
-              <a href={`/site/${s.config.id}`} class="font-medium hover:underline">{s.config.name}</a>
-              {#if s.config.cloneOf}
-                <span class="rounded border border-amber-400 px-1 py-0.5 text-xs font-medium text-amber-500">Clone</span>
-              {/if}
-              <span class="text-xs text-zinc-500">{hostLabel(s)}</span>
-              <span class="text-xs text-zinc-400">
-                PHP {s.config.services.php.version} · {s.config.services.db.type} {s.config.services.db.version}
-              </span>
-            </div>
-            {#if s.status === 'migrationPending'}
-              <div class="flex items-center gap-2">
-                <button
-                  class="rounded px-3 py-1.5 text-sm text-zinc-400 hover:text-red-400 disabled:opacity-50"
-                  disabled={busy[s.config.id]}
-                  onclick={() => cancelImport(s)}
-                >
-                  Cancelar
-                </button>
-                <button
-                  class="rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-                  disabled={busy[s.config.id]}
-                  onclick={() => migrate(s)}
-                >
-                  {busy[s.config.id] ? '…' : 'Migrar y encender'}
-                </button>
-              </div>
-            {:else}
-              <div class="flex items-center gap-2">
-                <button
-                  class="rounded px-3 py-1.5 text-sm font-medium"
-                  class:bg-green-600={s.status !== 'running'}
-                  class:text-white={s.status !== 'running'}
-                  class:bg-zinc-200={s.status === 'running'}
-                  class:dark:bg-zinc-800={s.status === 'running'}
-                  disabled={busy[s.config.id]}
-                  onclick={() => toggle(s)}
-                >
-                  {busy[s.config.id] ? '…' : s.status === 'running' ? 'Detener' : 'Encender'}
-                </button>
-                <button
-                  class="rounded px-2 py-1.5 text-sm text-zinc-400 hover:text-red-500 disabled:opacity-50"
-                  disabled={busy[s.config.id]}
-                  title="Eliminar proyecto"
-                  onclick={() => (deleteTarget = s)}
-                >
-                  Eliminar
-                </button>
-              </div>
-            {/if}
-          </div>
+        {#each nodes as node (node.site.config.id)}
+          {@render siteRow(node.site, false)}
+          {#each node.clones as c (c.config.id)}
+            {@render siteRow(c, true)}
+          {/each}
         {/each}
       </div>
     </section>
   {/each}
 {/if}
+
+{#snippet siteRow(s: SiteState, isClone: boolean)}
+  <div
+    class="flex items-center justify-between border-b border-zinc-100 px-4 py-3 last:border-0 dark:border-zinc-800/60 {isClone ? 'bg-zinc-50 dark:bg-zinc-900/40' : ''}"
+  >
+    <div class="flex items-center gap-3" class:pl-6={isClone}>
+      {#if isClone}
+        <span class="text-zinc-300 dark:text-zinc-600" aria-hidden="true">└</span>
+      {/if}
+      <span
+        class="inline-block h-2.5 w-2.5 rounded-full"
+        class:bg-green-500={s.status === 'running'}
+        class:bg-zinc-400={s.status === 'stopped'}
+        class:bg-amber-500={s.status === 'migrationPending'}
+      ></span>
+      <a href={`/site/${s.config.id}`} class="font-medium hover:underline">{s.config.name}</a>
+      {#if isClone}
+        <span class="rounded border border-amber-400 px-1 py-0.5 text-xs font-medium text-amber-500">Clone</span>
+      {/if}
+      <span class="text-xs text-zinc-500">{hostLabel(s)}</span>
+      <span class="text-xs text-zinc-400">
+        PHP {s.config.services.php.version} · {s.config.services.db.type} {s.config.services.db.version}
+      </span>
+    </div>
+    {#if s.status === 'migrationPending'}
+      <div class="flex items-center gap-2">
+        <button
+          class="rounded px-3 py-1.5 text-sm text-zinc-400 hover:text-red-400 disabled:opacity-50"
+          disabled={busy[s.config.id]}
+          onclick={() => cancelImport(s)}
+        >
+          Cancelar
+        </button>
+        <button
+          class="rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          disabled={busy[s.config.id]}
+          onclick={() => migrate(s)}
+        >
+          {busy[s.config.id] ? '…' : 'Migrar y encender'}
+        </button>
+      </div>
+    {:else}
+      <div class="flex items-center gap-2">
+        <button
+          class="rounded px-3 py-1.5 text-sm font-medium"
+          class:bg-green-600={s.status !== 'running'}
+          class:text-white={s.status !== 'running'}
+          class:bg-zinc-200={s.status === 'running'}
+          class:dark:bg-zinc-800={s.status === 'running'}
+          disabled={busy[s.config.id]}
+          onclick={() => toggle(s)}
+        >
+          {busy[s.config.id] ? '…' : s.status === 'running' ? 'Detener' : 'Encender'}
+        </button>
+        <button
+          class="rounded px-2 py-1.5 text-sm text-zinc-400 hover:text-red-500 disabled:opacity-50"
+          disabled={busy[s.config.id]}
+          title="Eliminar proyecto"
+          onclick={() => (deleteTarget = s)}
+        >
+          Eliminar
+        </button>
+      </div>
+    {/if}
+  </div>
+{/snippet}
 
 <OpConsole open={consoleOpen} running={migrating} title="Migración" onClose={() => (consoleOpen = false)} />
 
