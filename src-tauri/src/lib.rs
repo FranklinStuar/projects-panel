@@ -344,13 +344,32 @@ async fn import_localwp_site(app: AppHandle, id: String) -> CmdResult<localwp::I
 }
 
 /// Abre el admin en el navegador (auto-login si el proyecto lo tiene activado).
+/// `user_id` = ID de usuario WordPress; None o 0 = primer administrador.
 #[tauri::command]
-async fn open_admin(app: AppHandle, id: String) -> CmdResult<()> {
+async fn open_admin(app: AppHandle, id: String, user_id: Option<u64>) -> CmdResult<()> {
     let site = config::find_site(&id)
         .map_err(e)?
         .ok_or_else(|| format!("proyecto {id} no encontrado"))?;
     let docker = DockerManager::connect().map_err(e)?;
-    autologin::open_admin(&app, &docker, &site).await.map_err(e)
+    autologin::open_admin(&app, &docker, &site, user_id).await.map_err(e)
+}
+
+/// Lista los usuarios de WordPress del proyecto (ID, login, display_name, roles).
+#[tauri::command]
+async fn list_wp_users(id: String) -> CmdResult<Vec<serde_json::Value>> {
+    let site = config::find_site(&id)
+        .map_err(e)?
+        .ok_or_else(|| format!("proyecto {id} no encontrado"))?;
+    let docker = DockerManager::connect().map_err(e)?;
+    let args = vec![
+        "user".to_string(),
+        "list".to_string(),
+        "--fields=ID,user_login,display_name,roles".to_string(),
+        "--format=json".to_string(),
+    ];
+    let out = wpcli::run(&docker, &site, &args).await.map_err(e)?;
+    serde_json::from_str::<Vec<serde_json::Value>>(&out)
+        .map_err(|err| format!("no se pudo parsear lista de usuarios: {err}"))
 }
 
 /// (Re)inyecta el mu-plugin de auto-login (y el de mailpit) en un proyecto y
@@ -365,6 +384,31 @@ async fn repair_autologin(id: String) -> CmdResult<SiteConfig> {
     config::write_site_config(&site).map_err(e)?;
     wordpress::sync_mu_plugins(&site).map_err(e)?;
     Ok(site)
+}
+
+/// Regenera el php.ini de todos los proyectos desde el template actual.
+/// Útil para aplicar cambios de configuración (p. ej. OPcache) a proyectos existentes.
+/// Los proyectos deben reiniciarse para que el cambio surta efecto.
+#[tauri::command]
+async fn repair_all_php_ini() -> CmdResult<String> {
+    let sites = config::load_all_sites().map_err(e)?;
+    let total = sites.len();
+    let mut ok = 0usize;
+    let mut errors = Vec::new();
+    for site in &sites {
+        match wordpress::write_php_ini(site) {
+            Ok(_) => ok += 1,
+            Err(err) => errors.push(format!("{}: {}", site.name, err)),
+        }
+    }
+    if errors.is_empty() {
+        Ok(format!("php.ini actualizado en {ok}/{total} proyectos. Reinicia los que estén encendidos."))
+    } else {
+        Ok(format!(
+            "php.ini actualizado en {ok}/{total} proyectos.\nErrores:\n{}",
+            errors.join("\n")
+        ))
+    }
 }
 
 /// Abre la web pública del proyecto (home, sin auto-login) en el navegador.
@@ -765,7 +809,9 @@ pub fn run() {
             list_disconnected_sites,
             import_disconnected_site,
             open_admin,
+            list_wp_users,
             repair_autologin,
+            repair_all_php_ini,
             open_site,
             open_folder,
             open_terminal,

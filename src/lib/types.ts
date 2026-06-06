@@ -189,3 +189,11 @@ export interface NewSiteRequest {
   minio?: boolean;
   group?: string | null;
 }
+
+
+export interface WpUser {
+  ID: string;
+  user_login: string;
+  display_name: string;
+  roles: string;
+}

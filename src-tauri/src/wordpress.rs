@@ -203,7 +203,7 @@ pub(crate) fn write_php_ini(site: &SiteConfig) -> Result<()> {
     Ok(())
 }
 
-const DEFAULT_PHP_INI: &str = "memory_limit = 256M\nupload_max_filesize = 64M\npost_max_size = 64M\nmax_execution_time = 120\n";
+const DEFAULT_PHP_INI: &str = "memory_limit = 256M\nupload_max_filesize = 64M\npost_max_size = 64M\nmax_execution_time = 120\nopcache.enable = 1\nopcache.validate_timestamps = 1\nopcache.revalidate_freq = 0\n";
 
 /// Descarga `wordpress-{version}.tar.gz` y lo extrae en `public/` (strip wordpress/).
 pub async fn download_core(version: &str, public: &Path) -> Result<()> {
@@ -409,7 +409,7 @@ fn inject_mailpit_muplugin(site: &SiteConfig) -> Result<()> {
 }
 
 /// Inyecta el mu-plugin de auto-login (token efímero de un solo uso).
-fn inject_autologin_muplugin(site: &SiteConfig) -> Result<()> {
+pub(crate) fn inject_autologin_muplugin(site: &SiteConfig) -> Result<()> {
     let dir = site.public_dir().join("wp-content").join("mu-plugins");
     std::fs::create_dir_all(&dir)?;
     let tmpl = crate::docker::docker_assets_dir()
@@ -428,13 +428,22 @@ add_action( 'init', function () {
     $token = preg_replace( '/[^a-z0-9]/i', '', (string) $_GET['panel_autologin'] );
     if ( $token === '' ) { return; }
     $key = 'panel_autologin_' . $token;
-    if ( get_transient( $key ) === false ) { return; }
+    $stored = get_transient( $key );
+    if ( $stored === false ) { return; }
     delete_transient( $key );
-    $admins = get_users( array( 'role' => 'administrator', 'number' => 1 ) );
-    if ( empty( $admins ) ) { return; }
-    wp_set_current_user( $admins[0]->ID );
-    wp_set_auth_cookie( $admins[0]->ID, true );
-    wp_safe_redirect( admin_url() );
+    $user_id = intval( $stored );
+    if ( $user_id > 0 ) {
+        $user = get_userdata( $user_id );
+        if ( ! $user ) { return; }
+    } else {
+        $admins = get_users( array( 'role' => 'administrator', 'number' => 1 ) );
+        if ( empty( $admins ) ) { return; }
+        $user = $admins[0];
+    }
+    wp_set_current_user( $user->ID );
+    wp_set_auth_cookie( $user->ID, true );
+    $redirect = user_can( $user->ID, 'manage_options' ) ? admin_url() : home_url( '/' );
+    wp_safe_redirect( $redirect );
     exit;
 } );
 "#;

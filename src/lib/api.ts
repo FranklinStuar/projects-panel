@@ -12,7 +12,8 @@ import type {
   LocalSite,
   ImportResult,
   DisconnectedSite,
-  SnapshotMeta
+  SnapshotMeta,
+  WpUser
 } from './types';
 
 // Capa fina sobre los comandos IPC de Tauri (src-tauri/src/lib.rs).
@@ -39,8 +40,10 @@ export const api = {
   listDisconnectedSites: () => invoke<DisconnectedSite[]>('list_disconnected_sites'),
   importDisconnectedSite: (folderName: string) =>
     invoke<ImportResult>('import_disconnected_site', { folderName }),
-  openAdmin: (id: string) => invoke<void>('open_admin', { id }),
+  openAdmin: (id: string, userId?: number) => invoke<void>('open_admin', { id, userId }),
+  listWpUsers: (id: string) => invoke<WpUser[]>('list_wp_users', { id }),
   repairAutologin: (id: string) => invoke<SiteConfig>('repair_autologin', { id }),
+  repairAllPhpIni: () => invoke<string>('repair_all_php_ini'),
   openSite: (id: string) => invoke<void>('open_site', { id }),
   openFolder: (id: string) => invoke<void>('open_folder', { id }),
   streamLogs: (id: string) => invoke<void>('stream_logs', { id }),
