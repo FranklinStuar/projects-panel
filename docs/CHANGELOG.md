@@ -531,6 +531,18 @@ credenciales.
 - **Mock IPC** (`mock-ipc.ts`): casos `list_wp_users` y `repair_all_php_ini`
   para `pnpm dev:mock`.
 
+### Clones como sublista del padre + nombre desde el punto de guardado
+
+- **Dashboard**: los clones ya no son entradas de primer nivel; cuelgan de su
+  proyecto padre como sublista anidada (sangría + conector `└`, fondo tenue).
+  El emparejado se hace por `cloneOf.parentId`; los clones huérfanos (sin padre
+  presente) caen a primer nivel como respaldo. Fila extraída a un `{#snippet}`
+  reutilizado por padre y clones.
+- **`clone.rs`**: el nombre del clone = etiqueta del punto de guardado
+  (`meta.label`), no `"{padre} (clone)"`. El slug/carpeta/dominio se derivan de
+  esa etiqueta vía `slugify()` (`{parent_dirname}-{label_slug}`, con
+  desambiguación `-N`). `find_free_slot` ahora recibe el `base` ya construido.
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).

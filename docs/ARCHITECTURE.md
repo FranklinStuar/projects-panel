@@ -103,6 +103,8 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `ssl.rs` | `generate`: cert/key por dominio con mkcert en `ssl/` del proyecto. La CA local (`mkcert -install`) se hace una vez en `first-run.sh`. |
 | `dbus.rs` | Servidor D-Bus (zbus) para el plasmoid KDE; arranca en el `setup` de Tauri. Ver sección D-Bus. |
 | `backup.rs` | `export_db`: `wp db export` → `app/sql/db-{timestamp}.sql` (dump en la raíz pública montada, luego movido fuera de la raíz servida). `rotate_dumps`: deja solo los N `db-*.sql` más recientes. `stop_site` los invoca para exportar-al-detener. |
+| `snapshot.rs` | Puntos de guardado por proyecto en `~/panel-wp/{slug}/snapshots/{id}/` (`code.tar.zst` sin uploads/cache/wp-config/logs + `db.sql` + `meta.json` con `label`). `create_snapshot` (arranca solo el motor DB), `list_snapshots` (orden desc por fecha), `delete_snapshot`. |
+| `clone.rs` | `create_clone(parent_id, snapshot_id)`: crea un `SiteConfig` con `clone_of` poblado desde un punto de guardado. Comparte engine DB + nginx; solo añade 1 container php + 1 schema. **Nombre del clone = `meta.label`** del punto de guardado; slug/carpeta/dominio derivan de esa etiqueta vía `slugify()` (`{parent_dirname}-{label_slug}`, desambiguación `-N` o UUID corto en `find_free_slot`). Uploads viejos servidos vía fallback nginx desde el padre (ro); los nuevos en la carpeta del clone (rw). En el dashboard el clone se muestra anidado bajo su padre (no como proyecto suelto). |
 | `cli.rs` | `install_cli_wrapper`: copia `wp` y `wordpress-panel-cli` a `~/.local/bin` (chmod 755). El `wp` detecta el proyecto por el CWD vía `wordpress-panel-cli detect-project`. Se instala automáticamente al arrancar el panel (`run()` setup, idempotente), así no hay nada por-proyecto que instalar. `open_terminal_at`: lanza el primer emulador de terminal disponible (konsole, gnome-terminal, xfce4-terminal, kitty, alacritty, x-terminal-emulator) con cwd en la carpeta del proyecto. |
 | `integration_tests.rs` | Solo en `#[cfg(test)]`: tests de integración `#[ignore]` (Docker / import LocalWP hermético). Ver `docs/TESTING.md §A.2`. |
 
@@ -159,6 +161,10 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `open_mailpit` | — | `()` | Abre la UI de Mailpit. |
 | `open_minio` | — | `()` | Abre la consola de MinIO. |
 | `open_adminer` | `id` | `()` | Arranca `panel-adminer` y abre el navegador en la DB del proyecto (requiere proyecto corriendo). |
+| `create_snapshot` | `id, label` | `SnapshotMeta` | Crea un punto de guardado (tar código + dump DB). Emite `op-log`. |
+| `list_snapshots` | `id` | `Vec<SnapshotMeta>` | Puntos de guardado del proyecto (desc por fecha). |
+| `delete_snapshot` | `id, snapshotId` | `()` | Borra un punto de guardado del disco. |
+| `create_clone` | `id, snapshotId` | `SiteConfig` | Crea un clone temporal desde un punto de guardado; nombre = etiqueta del snapshot. Emite `op-log`. |
 | `feature_stub` | `feature` | `String` (Err) | Stub Cloudflare/deploy/package (fase posterior). |
 
 **Eventos** (backend → frontend, vía `app.emit`): `log:{id}` — una línea de log de
