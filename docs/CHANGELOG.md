@@ -585,6 +585,25 @@ ordenado. Dos arreglos independientes:
   poda el log, no los `.sql`). UI en Configuración: tabla de volcados + controles
   de limpieza por fecha / por base / todo.
 
+## Exclusiones en puntos de guardado
+
+Carpetas que pesan mucho y no interesa guardar (backups de plugins, carpetas
+propias del proyecto) se podían colar en cada punto de guardado.
+
+- **`SiteConfig::snapshot_excludes`** (`config.rs`, persistido en `config.json`):
+  rutas relativas a public que se añaden como `--exclude=./{ruta}` al tar del
+  código, sobre las fijas (uploads, cache, wp-config, *.log). Se heredan al clonar.
+- **`snapshot::detect_excludable`**: escanea las subcarpetas de `wp-content` (salvo
+  uploads/cache) y carpetas de backup conocidas (UpdraftPlus, All-in-One WP
+  Migration, WPvivid, Duplicator, Backuply), devolviendo cada una con su tamaño en
+  disco y un flag `known` (recomendado excluir). `meta.json` registra los `excludes`
+  aplicados en cada snapshot.
+- **Comandos** `detect_excludable` / `set_snapshot_excludes`; espejo en `api.ts` y
+  tipos `ExcludableEntry` / `SiteConfig.snapshotExcludes` / `SnapshotMeta.excludes`.
+- **UI** (pestaña Puntos de guardado): panel «Exclusiones» plegable con checkboxes
+  de carpetas detectadas (tamaño + badge del plugin para las conocidas), campo para
+  añadir rutas a mano y persistencia. Cada snapshot muestra cuántas carpetas excluyó.
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).

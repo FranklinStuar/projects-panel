@@ -155,6 +155,11 @@ pub struct SiteConfig {
     /// Poblado si este sitio es un clone temporal de otro.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clone_of: Option<CloneInfo>,
+    /// Rutas (relativas a `public_dir`) a excluir del tar del punto de guardado,
+    /// además de las exclusiones fijas (uploads, cache, wp-config, *.log).
+    /// P. ej. `wp-content/updraft`, `wp-content/ai1wm-backups`.
+    #[serde(default)]
+    pub snapshot_excludes: Vec<String>,
 }
 
 impl SiteConfig {
@@ -531,6 +536,7 @@ mod tests {
             migration_pending: true,
             last_migrated_at: None,
             clone_of: None,
+            snapshot_excludes: vec![],
         }
     }
 

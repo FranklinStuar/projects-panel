@@ -13,6 +13,7 @@ import type {
   ImportResult,
   DisconnectedSite,
   SnapshotMeta,
+  ExcludableEntry,
   WpUser,
   DumpLogEntry
 } from './types';
@@ -90,6 +91,10 @@ export const api = {
   listSnapshots: (id: string) => invoke<SnapshotMeta[]>('list_snapshots', { id }),
   deleteSnapshot: (id: string, snapshotId: string) =>
     invoke<void>('delete_snapshot', { id, snapshotId }),
+  detectExcludable: (id: string) =>
+    invoke<ExcludableEntry[]>('detect_excludable', { id }),
+  setSnapshotExcludes: (id: string, excludes: string[]) =>
+    invoke<void>('set_snapshot_excludes', { id, excludes }),
   createClone: (parentId: string, snapshotId: string) =>
     invoke<SiteConfig>('create_clone', { parentId, snapshotId })
 };
