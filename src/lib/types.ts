@@ -69,6 +69,8 @@ export interface SiteConfig {
   migrationPending: boolean;
   lastMigratedAt: string | null;
   cloneOf?: CloneInfo | null;
+  /** Rutas (relativas a public) excluidas del punto de guardado. */
+  snapshotExcludes?: string[];
 }
 
 /** Espejo de `snapshot::SnapshotMeta`. */
@@ -82,6 +84,20 @@ export interface SnapshotMeta {
   codeBytes: number;
   /** Bytes del db.sql; 0 en snapshots antiguos. */
   dbBytes: number;
+  /** Rutas extra excluidas en este snapshot; vacío en snapshots antiguos. */
+  excludes?: string[];
+}
+
+/** Espejo de `snapshot::ExcludableEntry`: carpeta candidata a excluir. */
+export interface ExcludableEntry {
+  /** Ruta relativa a public, p. ej. `wp-content/updraft`. */
+  path: string;
+  /** Tamaño en disco en bytes. */
+  bytes: number;
+  /** true si es carpeta de backup conocida (recomendado excluir). */
+  known: boolean;
+  /** Plugin de origen si `known`, p. ej. "UpdraftPlus". */
+  label: string | null;
 }
 
 /// Espejo de `config::Endpoint`: dónde publica el panel en el host.

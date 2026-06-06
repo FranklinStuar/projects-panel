@@ -31,7 +31,37 @@ pub struct SnapshotMeta {
     /// Bytes del archivo db.sql (0 si no se pudo medir).
     #[serde(default)]
     pub db_bytes: u64,
+    /// Rutas extra (relativas a public) excluidas del tar en este snapshot,
+    /// además de las fijas (uploads, cache, wp-config, *.log).
+    #[serde(default)]
+    pub excludes: Vec<String>,
 }
+
+/// Una carpeta candidata a excluir del punto de guardado, detectada en disco.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExcludableEntry {
+    /// Ruta relativa a `public_dir` (la que se persiste en `snapshot_excludes`).
+    pub path: String,
+    /// Tamaño en disco de la carpeta (bytes).
+    pub bytes: u64,
+    /// true si es una carpeta de backup conocida (recomendado excluir).
+    pub known: bool,
+    /// Plugin/origen asociado si `known`, p. ej. "UpdraftPlus".
+    pub label: Option<String>,
+}
+
+/// Carpetas de backup conocidas (ruta relativa a public → plugin de origen).
+/// Pesan mucho y casi nunca interesa guardarlas en un punto de guardado.
+const KNOWN_BACKUP_DIRS: &[(&str, &str)] = &[
+    ("wp-content/updraft", "UpdraftPlus"),
+    ("wp-content/ai1wm-backups", "All-in-One WP Migration"),
+    ("wp-content/wpvividbackups", "WPvivid"),
+    ("wp-content/backups-dup-lite", "Duplicator"),
+    ("wp-content/backups-dup-pro", "Duplicator Pro"),
+    ("wp-content/backuply", "Backuply"),
+    ("wp-snapshots", "Duplicator"),
+];
 
 fn snapshots_root(site: &SiteConfig) -> PathBuf {
     Path::new(&site.path).join("snapshots")
@@ -87,23 +117,39 @@ async fn run<R: Runtime>(
     let db_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
     log(app, format!("      ✓ Base de datos exportada ({}).", fmt_bytes(db_bytes)));
 
-    // [3/3] Tar del código, excluyendo uploads/cache/wp-config/logs.
-    log(app, "[3/3] Comprimiendo código fuente (excluyendo uploads y caché)…");
+    // [3/3] Tar del código, excluyendo uploads/cache/wp-config/logs + extras del proyecto.
+    let extras = &site.snapshot_excludes;
+    if extras.is_empty() {
+        log(app, "[3/3] Comprimiendo código fuente (excluyendo uploads y caché)…");
+    } else {
+        log(app, format!(
+            "[3/3] Comprimiendo código fuente (excluyendo uploads, caché y {} ruta(s) del proyecto)…",
+            extras.len()
+        ));
+    }
     let code_path = dir.join("code.tar.zst");
     let public = site.public_dir();
+    let mut tar_args: Vec<String> = vec![
+        "--zstd".into(),
+        "-cf".into(),
+        code_path.to_str().unwrap().to_string(),
+        "--exclude=./wp-content/uploads".into(),
+        "--exclude=./wp-content/cache".into(),
+        "--exclude=./wp-config.php".into(),
+        "--exclude=./*.log".into(),
+    ];
+    for rel in extras {
+        // Normaliza a ruta relativa a public; tar las quiere como `./ruta`.
+        let clean = rel.trim().trim_start_matches("./").trim_matches('/');
+        if !clean.is_empty() {
+            tar_args.push(format!("--exclude=./{clean}"));
+        }
+    }
+    tar_args.push("-C".into());
+    tar_args.push(public.to_str().context("ruta public inválida")?.to_string());
+    tar_args.push(".".into());
     let status = Command::new("tar")
-        .args([
-            "--zstd",
-            "-cf",
-            code_path.to_str().unwrap(),
-            "--exclude=./wp-content/uploads",
-            "--exclude=./wp-content/cache",
-            "--exclude=./wp-config.php",
-            "--exclude=./*.log",
-            "-C",
-            public.to_str().context("ruta public inválida")?,
-            ".",
-        ])
+        .args(&tar_args)
         .status()
         .await
         .context("ejecutando tar para el snapshot de código")?;
@@ -125,6 +171,7 @@ async fn run<R: Runtime>(
         db_type: site.services.db.db_type,
         code_bytes,
         db_bytes,
+        excludes: extras.clone(),
     };
     std::fs::write(dir.join("meta.json"), serde_json::to_string_pretty(&meta)?)
         .context("escribiendo meta.json del snapshot")?;
@@ -167,6 +214,88 @@ pub fn list_snapshots(site: &SiteConfig) -> Result<Vec<SnapshotMeta>> {
     }
     out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Ok(out)
+}
+
+/// Detecta carpetas candidatas a excluir del punto de guardado.
+///
+/// Devuelve: (a) cada subcarpeta inmediata de `wp-content` —salvo las ya
+/// excluidas siempre (`uploads`, `cache`)— para que el usuario pueda excluir
+/// carpetas propias del proyecto, y (b) carpetas de backup conocidas que existan
+/// (marcadas `known` y con la etiqueta del plugin). Ordenado por tamaño desc.
+pub fn detect_excludable(site: &SiteConfig) -> Result<Vec<ExcludableEntry>> {
+    let public = site.public_dir();
+    let mut out: Vec<ExcludableEntry> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // (a) Subcarpetas inmediatas de wp-content (excepto las forzadas).
+    let wp_content = public.join("wp-content");
+    if let Ok(rd) = std::fs::read_dir(&wp_content) {
+        for entry in rd.flatten() {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name == "uploads" || name == "cache" {
+                continue; // ya excluidas siempre
+            }
+            let rel = format!("wp-content/{name}");
+            let (known, label) = known_backup(&rel);
+            out.push(ExcludableEntry {
+                bytes: dir_size(&entry.path()),
+                path: rel.clone(),
+                known,
+                label,
+            });
+            seen.insert(rel);
+        }
+    }
+
+    // (b) Carpetas de backup conocidas fuera de wp-content (p. ej. wp-snapshots).
+    for (rel, label) in KNOWN_BACKUP_DIRS {
+        if seen.contains(*rel) {
+            continue;
+        }
+        let abs = public.join(rel);
+        if abs.is_dir() {
+            out.push(ExcludableEntry {
+                path: rel.to_string(),
+                bytes: dir_size(&abs),
+                known: true,
+                label: Some(label.to_string()),
+            });
+        }
+    }
+
+    out.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    Ok(out)
+}
+
+/// Si `rel` coincide con una carpeta de backup conocida, devuelve `(true, label)`.
+fn known_backup(rel: &str) -> (bool, Option<String>) {
+    for (k, label) in KNOWN_BACKUP_DIRS {
+        if *k == rel {
+            return (true, Some(label.to_string()));
+        }
+    }
+    (false, None)
+}
+
+/// Tamaño recursivo de un directorio en bytes (best-effort; ignora errores).
+fn dir_size(path: &Path) -> u64 {
+    let mut total = 0u64;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for entry in rd.flatten() {
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_dir() {
+                stack.push(entry.path());
+            } else if let Ok(m) = entry.metadata() {
+                total += m.len();
+            }
+        }
+    }
+    total
 }
 
 /// Borra el snapshot y sus archivos del disco.

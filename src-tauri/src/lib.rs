@@ -337,6 +337,7 @@ fn reconstruct_config(folder_name: &str, dir: &std::path::Path) -> SiteConfig {
         migration_pending: true,
         last_migrated_at: None,
         clone_of: None,
+        snapshot_excludes: vec![],
     }
 }
 
@@ -672,6 +673,28 @@ fn delete_snapshot(id: String, snapshot_id: String) -> CmdResult<()> {
     snapshot::delete_snapshot(&site, &snapshot_id).map_err(e)
 }
 
+/// Detecta carpetas candidatas a excluir del punto de guardado (backups, etc.).
+#[tauri::command]
+fn detect_excludable(id: String) -> CmdResult<Vec<snapshot::ExcludableEntry>> {
+    let site = load_site(&id)?;
+    snapshot::detect_excludable(&site).map_err(e)
+}
+
+/// Persiste la lista de rutas a excluir del punto de guardado de este proyecto.
+#[tauri::command]
+fn set_snapshot_excludes(id: String, excludes: Vec<String>) -> CmdResult<()> {
+    let mut site = load_site(&id)?;
+    let mut clean: Vec<String> = excludes
+        .into_iter()
+        .map(|s| s.trim().trim_start_matches("./").trim_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    clean.sort();
+    clean.dedup();
+    site.snapshot_excludes = clean;
+    config::write_site_config(&site).map_err(e)
+}
+
 /// Crea un clone temporal desde un punto de guardado. Emite progreso por `op-log`.
 #[tauri::command]
 async fn create_clone(
@@ -885,6 +908,8 @@ pub fn run() {
             create_snapshot,
             list_snapshots,
             delete_snapshot,
+            detect_excludable,
+            set_snapshot_excludes,
             create_clone
         ])
         .run(tauri::generate_context!())

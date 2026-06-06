@@ -4,7 +4,7 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { api } from '$lib/api';
-  import type { SiteState, GhStatus, DetectedRepo, Endpoint, SnapshotMeta, WpUser } from '$lib/types';
+  import type { SiteState, GhStatus, DetectedRepo, Endpoint, SnapshotMeta, ExcludableEntry, WpUser } from '$lib/types';
   import OpConsole from '$lib/components/OpConsole.svelte';
   import DeleteProjectModal from '$lib/components/DeleteProjectModal.svelte';
 
@@ -69,6 +69,58 @@
   // Clone en curso (OpConsole)
   let cloneConsoleOpen = $state(false);
   let cloning = $state(false);
+  // Exclusiones del punto de guardado
+  let showExcludes = $state(false);
+  let excludable = $state<ExcludableEntry[]>([]);
+  let excludablesLoading = $state(false);
+  let selectedExcludes = $state<string[]>([]);
+  let manualExclude = $state('');
+  let excludesBusy = $state(false);
+
+  /** Rutas seleccionadas que no salen en la lista detectada (añadidas a mano o ya no existen en disco). */
+  let manualOnlyExcludes = $derived(
+    selectedExcludes.filter((p) => !excludable.some((e) => e.path === p))
+  );
+
+  async function openExcludes() {
+    showExcludes = true;
+    selectedExcludes = [...(site?.config.snapshotExcludes ?? [])];
+    excludablesLoading = true;
+    try {
+      excludable = await api.detectExcludable(id);
+    } catch (err) {
+      snapshotsError = String(err);
+    } finally {
+      excludablesLoading = false;
+    }
+  }
+
+  function toggleExclude(path: string) {
+    selectedExcludes = selectedExcludes.includes(path)
+      ? selectedExcludes.filter((p) => p !== path)
+      : [...selectedExcludes, path];
+  }
+
+  function addManualExclude() {
+    const v = manualExclude.trim().replace(/^\.?\/+/, '').replace(/\/+$/, '');
+    if (v && !selectedExcludes.includes(v)) selectedExcludes = [...selectedExcludes, v];
+    manualExclude = '';
+  }
+
+  async function saveExcludes() {
+    if (!site) return;
+    excludesBusy = true;
+    snapshotsError = null;
+    try {
+      await api.setSnapshotExcludes(id, selectedExcludes);
+      site.config.snapshotExcludes = [...selectedExcludes];
+      showExcludes = false;
+    } catch (err) {
+      snapshotsError = String(err);
+    } finally {
+      excludesBusy = false;
+    }
+  }
 
   function fmtBytes(b: number): string {
     if (b <= 0) return '';
@@ -795,6 +847,102 @@
           </button>
         {/if}
       </div>
+
+      <!-- Exclusiones: carpetas que NO se guardan en el punto de guardado -->
+      <div class="mb-5 rounded border border-zinc-200 dark:border-zinc-800">
+        <button
+          class="flex w-full items-center justify-between px-3 py-2 text-left text-sm"
+          onclick={() => (showExcludes ? (showExcludes = false) : openExcludes())}
+        >
+          <span class="font-medium">Exclusiones</span>
+          <span class="text-xs text-zinc-500">
+            {#if (site.config.snapshotExcludes?.length ?? 0) > 0}
+              {site.config.snapshotExcludes!.length} carpeta(s) excluida(s) · editar
+            {:else}
+              ninguna · configurar
+            {/if}
+            <span class="ml-1">{showExcludes ? '▾' : '▸'}</span>
+          </span>
+        </button>
+
+        {#if showExcludes}
+          <div class="border-t border-zinc-200 px-3 py-3 dark:border-zinc-800">
+            <p class="mb-2 text-xs text-zinc-500">
+              Siempre se excluyen uploads, caché, wp-config.php y *.log. Marca aquí
+              carpetas adicionales (backups de plugins, carpetas propias) para que
+              no pesen en cada punto de guardado.
+            </p>
+
+            {#if excludablesLoading}
+              <p class="text-sm text-zinc-500">Escaneando carpetas…</p>
+            {:else}
+              {#if excludable.length === 0 && manualOnlyExcludes.length === 0}
+                <p class="text-sm text-zinc-500">No se detectaron carpetas. Añade una ruta a mano abajo.</p>
+              {/if}
+
+              <div class="flex flex-col gap-1">
+                {#each excludable as ex (ex.path)}
+                  <label class="flex items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-900">
+                    <input
+                      type="checkbox"
+                      checked={selectedExcludes.includes(ex.path)}
+                      onchange={() => toggleExclude(ex.path)}
+                    />
+                    <span class="font-mono text-xs">{ex.path}</span>
+                    {#if ex.known}
+                      <span class="rounded bg-amber-100 px-1.5 text-[10px] font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                        {ex.label} · recomendado
+                      </span>
+                    {/if}
+                    <span class="ml-auto text-xs text-zinc-400">{fmtBytes(ex.bytes)}</span>
+                  </label>
+                {/each}
+
+                <!-- Excludes persistidos/manuales que no están en disco -->
+                {#each manualOnlyExcludes as p (p)}
+                  <label class="flex items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-900">
+                    <input type="checkbox" checked={true} onchange={() => toggleExclude(p)} />
+                    <span class="font-mono text-xs">{p}</span>
+                    <span class="rounded bg-zinc-100 px-1.5 text-[10px] text-zinc-500 dark:bg-zinc-800">manual</span>
+                  </label>
+                {/each}
+              </div>
+
+              <div class="mt-3 flex items-center gap-2">
+                <input
+                  class="flex-1 rounded border border-zinc-300 px-2 py-1 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                  placeholder="ruta relativa, p. ej. wp-content/mi-carpeta"
+                  bind:value={manualExclude}
+                  onkeydown={(e) => e.key === 'Enter' && addManualExclude()}
+                />
+                <button
+                  class="rounded bg-zinc-200 px-2.5 py-1 text-xs dark:bg-zinc-800 disabled:opacity-50"
+                  disabled={!manualExclude.trim()}
+                  onclick={addManualExclude}
+                >
+                  Añadir
+                </button>
+              </div>
+
+              <div class="mt-3 flex justify-end gap-2">
+                <button
+                  class="rounded px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-600"
+                  onclick={() => (showExcludes = false)}
+                >
+                  Cancelar
+                </button>
+                <button
+                  class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                  disabled={excludesBusy}
+                  onclick={saveExcludes}
+                >
+                  {excludesBusy ? '…' : 'Guardar exclusiones'}
+                </button>
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
     {:else}
       <p class="mb-4 text-sm text-zinc-500">
         Los puntos de guardado se crean en el proyecto original, no en el clone.
@@ -825,6 +973,11 @@
                     <span title="Dump de base de datos (db.sql)">BD {fmtBytes(snap.dbBytes)}</span>
                   {/if}
                   <span class="font-medium text-zinc-300">total {fmtBytes(snap.codeBytes + snap.dbBytes)}</span>
+                </div>
+              {/if}
+              {#if snap.excludes && snap.excludes.length > 0}
+                <div class="mt-0.5 text-xs text-zinc-500" title={snap.excludes.join('\n')}>
+                  {snap.excludes.length} carpeta(s) excluida(s)
                 </div>
               {/if}
             </div>

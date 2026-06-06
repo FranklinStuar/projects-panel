@@ -100,6 +100,7 @@ async fn run<R: Runtime>(
             snapshot_id: snapshot_id.to_string(),
             created_at: Utc::now().to_rfc3339(),
         }),
+        snapshot_excludes: parent.snapshot_excludes.clone(),
     };
 
     // -- 1. Estructura de carpetas + php.ini + config.json --------------------
@@ -266,6 +267,7 @@ mod tests {
             migration_pending: false,
             last_migrated_at: None,
             clone_of: None,
+            snapshot_excludes: vec![],
         }
     }
 
