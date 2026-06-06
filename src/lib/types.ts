@@ -197,3 +197,15 @@ export interface WpUser {
   display_name: string;
   roles: string;
 }
+
+/** Una entrada del log de volcados de DB (espejo de `DumpLogEntry` en Rust). */
+export interface DumpLogEntry {
+  timestamp: string;
+  siteId: string;
+  siteName: string;
+  dbName: string;
+  file: string;
+  bytes: number;
+  /** `auto` | `stop` | `manual` */
+  source: string;
+}

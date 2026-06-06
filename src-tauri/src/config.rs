@@ -42,6 +42,16 @@ impl DbType {
             DbType::Postgres => 5432,
         }
     }
+
+    /// Directorio de datos DENTRO del container. Lo bindeamos a un dir del host
+    /// (`config_dir/db-data/{container}`) para que los datos sobrevivan al
+    /// recreado del container y a un apagón (almacenamiento durable).
+    pub fn datadir(&self) -> &'static str {
+        match self {
+            DbType::Mysql | DbType::Mariadb => "/var/lib/mysql",
+            DbType::Postgres => "/var/lib/postgresql/data",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

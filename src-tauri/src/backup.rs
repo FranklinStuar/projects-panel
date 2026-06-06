@@ -12,9 +12,10 @@ use std::path::Path;
 use crate::config::SiteConfig;
 use crate::docker::{db_container_name, DockerManager};
 
-/// Exporta la DB del proyecto a `dest`. Ruta arbitraria; el directorio padre
-/// debe existir o crearse antes de llamar. Necesita el engine DB corriendo.
-pub async fn export_db_to(docker: &DockerManager, site: &SiteConfig, dest: &Path) -> Result<()> {
+/// Captura el dump de la DB del proyecto en memoria. Necesita el engine DB
+/// corriendo. Lo usan `export_db_to` (lo escribe a disco) y el auto-dump
+/// (compara su hash para decidir si hubo cambios). Ver `autodump.rs`.
+pub async fn dump_bytes(docker: &DockerManager, site: &SiteConfig) -> Result<Vec<u8>> {
     let db_container = db_container_name(&site.services.db);
     if !docker.is_running(&db_container).await {
         return Err(anyhow!(
@@ -39,6 +40,13 @@ pub async fn export_db_to(docker: &DockerManager, site: &SiteConfig, dest: &Path
     if dump.is_empty() {
         return Err(anyhow!("mysqldump no produjo salida para {dbname}"));
     }
+    Ok(dump)
+}
+
+/// Exporta la DB del proyecto a `dest`. Ruta arbitraria; el directorio padre
+/// debe existir o crearse antes de llamar. Necesita el engine DB corriendo.
+pub async fn export_db_to(docker: &DockerManager, site: &SiteConfig, dest: &Path) -> Result<()> {
+    let dump = dump_bytes(docker, site).await?;
     std::fs::write(dest, &dump)?;
     Ok(())
 }

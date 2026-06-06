@@ -158,18 +158,28 @@ impl DockerManager {
         let image = db.db_type.image(&db.version);
         self.ensure_image(&image).await?;
 
+        let data_dir = db_data_dir(db)?;
+        let datadir_in = db.db_type.datadir();
+
         if self.exists(&name).await {
-            // existe parado → solo arrancar
-            self.docker
-                .start_container(&name, None::<StartContainerOptions<String>>)
-                .await?;
-            self.wait_db_ready(&name, db).await?;
-            return Ok(name);
+            // Containers creados antes del almacenamiento durable no tienen el
+            // bind: sus datos viven en la capa de escritura del container y se
+            // pierden si se recrea. Migrarlos al host antes de seguir.
+            if self.db_has_volume(&name, datadir_in).await {
+                self.docker
+                    .start_container(&name, None::<StartContainerOptions<String>>)
+                    .await?;
+                self.wait_db_ready(&name, db).await?;
+                return Ok(name);
+            }
+            self.migrate_db_to_volume(&name, &data_dir, datadir_in).await?;
+            // El container viejo ya fue eliminado; cae al create con bind abajo.
         }
 
         let env = db_env(db);
         let host_config = HostConfig {
             network_mode: Some(NETWORK.to_string()),
+            binds: Some(vec![format!("{}:{}", data_dir.display(), datadir_in)]),
             ..Default::default()
         };
         let config = Config {
@@ -193,6 +203,65 @@ impl DockerManager {
             .await?;
         self.wait_db_ready(&name, db).await?;
         Ok(name)
+    }
+
+    /// ¿El container DB ya tiene montado su datadir en el host? (bind durable).
+    async fn db_has_volume(&self, name: &str, datadir_in: &str) -> bool {
+        match self.docker.inspect_container(name, None).await {
+            Ok(info) => info
+                .mounts
+                .map(|ms| {
+                    ms.iter()
+                        .any(|m| m.destination.as_deref() == Some(datadir_in))
+                })
+                .unwrap_or(false),
+            Err(_) => false,
+        }
+    }
+
+    /// Migra un container DB legado (sin bind) a almacenamiento durable: copia su
+    /// datadir de la capa de escritura al host y elimina el container para que
+    /// `ensure_db` lo recree con el bind. Copia lossless (archivos, agnóstica de
+    /// versión), así no se pierde ninguna base de datos.
+    ///
+    /// Usa el CLI `docker cp` (excepción documentada al uso exclusivo de bollard):
+    /// extraer un directorio por el stream tar de bollard es complejo y `cp` lo
+    /// hace en un paso. Es una migración de una sola vez por container.
+    async fn migrate_db_to_volume(
+        &self,
+        name: &str,
+        host_dir: &std::path::Path,
+        datadir_in: &str,
+    ) -> Result<()> {
+        // No copiar sobre un host_dir ya poblado (evita mezclar dos datadirs).
+        let host_empty = std::fs::read_dir(host_dir)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true);
+        if host_empty {
+            let src = format!("{name}:{datadir_in}/.");
+            let status = std::process::Command::new("docker")
+                .arg("cp")
+                .arg(&src)
+                .arg(host_dir)
+                .status()
+                .context("ejecutando `docker cp` para migrar la DB a volumen durable")?;
+            if !status.success() {
+                return Err(anyhow!(
+                    "`docker cp {src}` falló al migrar la DB a almacenamiento durable"
+                ));
+            }
+        }
+        self.docker
+            .remove_container(
+                name,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                }),
+            )
+            .await
+            .with_context(|| format!("eliminando container DB legado {name}"))?;
+        Ok(())
     }
 
     /// Espera a que la DB acepte conexiones **por TCP** antes de seguir. Crítico:
@@ -658,7 +727,9 @@ impl DockerManager {
         if self.is_running(&cname).await {
             // Export-al-detener: deja un dump fresco en app/sql/ (migración +
             // protección de datos) antes de apagar. Best-effort: no bloquea el stop.
-            crate::backup::export_db(self, site).await.ok();
+            if let Ok(path) = crate::backup::export_db(self, site).await {
+                crate::dumplog::append(site, &path, "stop").ok();
+            }
             crate::backup::rotate_dumps(site, 3).ok();
             self.docker
                 .stop_container(&cname, Some(StopContainerOptions { t: 10 }))
@@ -880,6 +951,17 @@ pub fn db_container_name(db: &DbService) -> String {
         db.db_type.service_prefix(),
         db.version.replace('.', "")
     )
+}
+
+/// Directorio del host donde persiste el datadir de un container DB compartido
+/// (`config_dir/db-data/{container}`). Lo crea si falta. Bindeado a
+/// `DbType::datadir()` para almacenamiento durable (sobrevive recreado / apagón).
+pub fn db_data_dir(db: &DbService) -> Result<std::path::PathBuf> {
+    let dir = crate::config::config_dir()?
+        .join("db-data")
+        .join(db_container_name(db));
+    std::fs::create_dir_all(&dir).ok();
+    Ok(dir)
 }
 
 /// uid/gid del usuario host, para mapear www-data dentro del container.
