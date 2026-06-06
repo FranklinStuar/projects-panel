@@ -543,6 +543,36 @@ credenciales.
   esa etiqueta vía `slugify()` (`{parent_dirname}-{label_slug}`, con
   desambiguación `-N`). `find_free_slot` ahora recibe el `base` ya construido.
 
+## DB durable + auto-dump (protección ante apagón)
+
+Tras un apagón con un proyecto activo se perdían los datos: la DB compartida no
+tenía almacenamiento durable y el export-al-detener solo corría en un stop
+ordenado. Dos arreglos independientes:
+
+- **DB durable** (`docker.rs`): `ensure_db` bindea el datadir del container DB
+  compartido a un dir del host (`db_data_dir` → `config_dir/db-data/{container}`,
+  montado en `DbType::datadir()` — `/var/lib/mysql` o el de Postgres). Sobrevive
+  al recreado del container y al apagón. Los containers legados (sin bind) se
+  migran una sola vez sin pérdida: `migrate_db_to_volume` copia el datadir al host
+  con `docker cp` (excepción CLI documentada) y recrea el container con el bind;
+  `db_has_volume` detecta si ya estaba migrado.
+- **Auto-dump** (`autodump.rs`, estado Tauri `AutoDump`): un watcher por proyecto
+  activo deja un dump fresco en `app/sql/` cuando cambia su DB. Sondea cada 20s
+  con un gate barato (`SHOW GLOBAL STATUS Innodb_rows_*`) para no volcar si la DB
+  está ociosa; si hubo escrituras, `backup::dump_bytes` + hash y, si difiere del
+  último, persiste un dump nuevo + `rotate_dumps(3)`. Se engancha en `start_site`
+  y en el `setup` (sitios ya activos al abrir el panel); se aborta en
+  `stop_site`/`stop_all_sites` (el stop ya hace el export-al-detener final).
+- `backup.rs`: extraído `dump_bytes` (captura en memoria) reusado por el export a
+  disco y por el auto-dump.
+- **Log de volcados** (`dumplog.rs`): cada dump escrito en `app/sql/` (auto, al
+  detener o manual) queda registrado en `config_dir/dump-log.jsonl` (`DumpLogEntry`:
+  timestamp, sitio, base de datos, ruta, bytes, origen) para revisarlo y comparar.
+  Comandos `dump_log` (listar, más nuevos primero) y `clean_dump_log(before?,
+  dbName?)` (limpieza por fecha y/o base de datos; sin filtros borra todo; solo
+  poda el log, no los `.sql`). UI en Configuración: tabla de volcados + controles
+  de limpieza por fecha / por base / todo.
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).

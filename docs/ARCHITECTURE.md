@@ -86,7 +86,7 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 |---|---|
 | `lib.rs` | Comandos `#[tauri::command]`, `run()` (incl. `GTK_CSD=0` en Linux para decoración nativa), registro en `invoke_handler!`. |
 | `config.rs` | Modelos (`SiteConfig`, `Services`, `DbType`, `SiteStatus`, `SiteState`), rutas (`config_dir`, `projects_root`), persistencia (`load_all_sites`, `read/write_site_config`, `find_site`). **`Endpoint`** (dónde publica el panel en el host: `loopbackIp`/`httpPort`/`httpsPort`, helper `site_url`) + `PanelConfig` persistido en `panel.json` (`load/save_endpoint`, `endpoint_or_default`). |
-| `docker.rs` | `DockerManager` (bollard): red, ensure_db/ensure_nginx, start/stop_site, teardown, `exec`/`exec_as` (fija usuario; chequea exit code), helpers uid/gid e imagen-context. `wait_db_ready` (gatea sobre TCP antes de usar la DB). Selección de endpoint (`select_endpoint`/`autoselect_endpoint`/`preflight_endpoint`) con autodetección de puerto libre. |
+| `docker.rs` | `DockerManager` (bollard): red, ensure_db/ensure_nginx, start/stop_site, teardown, `exec`/`exec_as` (fija usuario; chequea exit code), helpers uid/gid e imagen-context. `wait_db_ready` (gatea sobre TCP antes de usar la DB). `ensure_db` bindea el datadir a un dir durable del host (`db_data_dir` → `config_dir/db-data/{container}`, montado en `DbType::datadir()`) y migra containers legados sin bind (`migrate_db_to_volume` vía `docker cp` + recreado; `db_has_volume` detecta el bind). Selección de endpoint (`select_endpoint`/`autoselect_endpoint`/`preflight_endpoint`) con autodetección de puerto libre. |
 | `nginx.rs` | Render/escritura/borrado de vhosts en `~/.config/wordpress-panel/nginx/conf.d/`. |
 | `php.rs` | `ensure_php_image` (docker build por versión), `wp_cli_phar_path` (descarga el phar). |
 | `domain.rs` | dnsmasq wildcard `*.test`: snippet + detección de resolución (`resolves_to`). Regla parametrizada por IP (`wildcard_rule`); `install_wildcard` la instala vía `pkexec` y recarga NetworkManager (para endpoint con IP loopback alterna). |
@@ -102,7 +102,9 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `github.rs` | `gh`/`git` en el HOST (no container, los archivos están bind-montados): `status`, `clone`, `pull`, `remove_dir`, `propose_path`. `scan` autodetecta repos git bajo wp-content (`DetectedRepo`); `read_repo_meta` lee remoto/rama de un huérfano; `open_vscode` + `ensure_workspace` (genera `.code-workspace` multi-root, una vez). Repos en `github.repos` (lista genérica; `GithubConfig::normalize` pliega el legacy theme/plugins). Sin auth propia. |
 | `ssl.rs` | `generate`: cert/key por dominio con mkcert en `ssl/` del proyecto. La CA local (`mkcert -install`) se hace una vez en `first-run.sh`. |
 | `dbus.rs` | Servidor D-Bus (zbus) para el plasmoid KDE; arranca en el `setup` de Tauri. Ver sección D-Bus. |
-| `backup.rs` | `export_db`: `wp db export` → `app/sql/db-{timestamp}.sql` (dump en la raíz pública montada, luego movido fuera de la raíz servida). `rotate_dumps`: deja solo los N `db-*.sql` más recientes. `stop_site` los invoca para exportar-al-detener. |
+| `backup.rs` | `dump_bytes`: captura `mysqldump` (dentro del container DB, socket local) en memoria. `export_db`/`export_db_to`: lo escriben en `app/sql/db-{timestamp}.sql`. `rotate_dumps`: deja solo los N `db-*.sql` más recientes. `stop_site` los invoca para exportar-al-detener. El auto-dump (`autodump.rs`) reusa `dump_bytes`. |
+| `autodump.rs` | Estado Tauri `AutoDump` (`Mutex<HashMap<id, JoinHandle>>`): un watcher por proyecto activo que protege contra pérdida de datos por apagón. Sondea cada 20s; gate barato por `SHOW GLOBAL STATUS Innodb_rows_*` (no vuelca si la DB está ociosa); cuando hay escrituras, `dump_bytes` + hash y si difiere del último, persiste un dump nuevo en `app/sql/` + `rotate_dumps` + lo registra en `dumplog` (source `auto`). Se engancha en `start_site` y en el `setup` (sitios ya activos al abrir); se aborta en `stop_site`/`stop_all_sites`. |
+| `dumplog.rs` | Log de volcados de DB (`config_dir/dump-log.jsonl`, JSONL `DumpLogEntry`): una línea por cada dump escrito en `app/sql/` para revisar y comparar. `append` (lo llaman auto-dump, export-al-detener y export manual con su `source`), `read_all` (más nuevos primero), `clean(before?, dbName?)` (poda por fecha y/o base de datos; sin filtros borra todo; no toca los `.sql`). |
 | `snapshot.rs` | Puntos de guardado por proyecto en `~/panel-wp/{slug}/snapshots/{id}/` (`code.tar.zst` sin uploads/cache/wp-config/logs + `db.sql` + `meta.json` con `label`). `create_snapshot` (arranca solo el motor DB), `list_snapshots` (orden desc por fecha), `delete_snapshot`. |
 | `clone.rs` | `create_clone(parent_id, snapshot_id)`: crea un `SiteConfig` con `clone_of` poblado desde un punto de guardado. Comparte engine DB + nginx; solo añade 1 container php + 1 schema. **Nombre del clone = `meta.label`** del punto de guardado; slug/carpeta/dominio derivan de esa etiqueta vía `slugify()` (`{parent_dirname}-{label_slug}`, desambiguación `-N` o UUID corto en `find_free_slot`). Uploads viejos servidos vía fallback nginx desde el padre (ro); los nuevos en la carpeta del clone (rw). En el dashboard el clone se muestra anidado bajo su padre (no como proyecto suelto). |
 | `cli.rs` | `install_cli_wrapper`: copia `wp` y `wordpress-panel-cli` a `~/.local/bin` (chmod 755). El `wp` detecta el proyecto por el CWD vía `wordpress-panel-cli detect-project`. Se instala automáticamente al arrancar el panel (`run()` setup, idempotente), así no hay nada por-proyecto que instalar. `open_terminal_at`: lanza el primer emulador de terminal disponible (konsole, gnome-terminal, xfce4-terminal, kitty, alacritty, x-terminal-emulator) con cwd en la carpeta del proyecto. |
@@ -155,7 +157,9 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `regenerate_ssl` | `id` | `()` | Regenera cert mkcert + reload nginx. |
 | `set_site_group` | `id, group?` | `SiteConfig` | Asigna/quita grupo del proyecto. |
 | `set_site_minio` | `id, enabled` | `SiteConfig` | Activa/desactiva MinIO; arranca el servicio si el proyecto corre. |
-| `export_db` | `id` | `String` (ruta) | Dump de la DB a `app/sql/`. |
+| `export_db` | `id` | `String` (ruta) | Dump de la DB a `app/sql/` (lo registra en el log de volcados, source `manual`). |
+| `dump_log` | — | `Vec<DumpLogEntry>` | Log de volcados de DB, más nuevos primero (para revisar/comparar). |
+| `clean_dump_log` | `before?`, `dbName?` | `usize` | Borra entradas del log por fecha (anteriores a `before`, ISO) y/o por base de datos. Sin filtros borra todo. NO toca los `.sql`. Devuelve cuántas borró. |
 | `install_cli_wrapper` | — | `String` | Instala `wp`/`wordpress-panel-cli` en `~/.local/bin`. También se ejecuta solo al arrancar el panel. |
 | `open_terminal` | `id` | `()` | Instala el wrapper (idempotente) y abre un emulador de terminal con cwd en la carpeta del proyecto; dentro funciona `wp`. |
 | `open_mailpit` | — | `()` | Abre la UI de Mailpit. |
@@ -212,7 +216,9 @@ sigue funcionando sin widget.
 ├── wp-cli.phar                    montado ro en cada wp-{id}
 ├── wp-versions.json               cache 24h de versiones WP
 ├── minio-data/                    datos del S3 compartido (panel-minio)
+├── db-data/{container}/           datadir durable de cada DB compartida (bind)
 ├── panel.json                     estado global del panel (Endpoint elegido)
+├── dump-log.jsonl                 log de volcados de DB (revisión + limpieza)
 └── dnsmasq-panel.conf             snippet wildcard (referencia)
 
 ~/panel-wp/{slug}/                 (projects_root) — FUENTE DE VERDAD
