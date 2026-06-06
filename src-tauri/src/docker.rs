@@ -162,10 +162,13 @@ impl DockerManager {
         let datadir_in = db.db_type.datadir();
 
         if self.exists(&name).await {
-            // Containers creados antes del almacenamiento durable no tienen el
-            // bind: sus datos viven en la capa de escritura del container y se
-            // pierden si se recrea. Migrarlos al host antes de seguir.
-            if self.db_has_volume(&name, datadir_in).await {
+            // Containers creados antes del almacenamiento durable no tienen
+            // NUESTRO bind. Sus datos están o en la capa de escritura, o en un
+            // volumen anónimo de Docker (la imagen mysql declara `VOLUME
+            // /var/lib/mysql`): este último sobrevive al reinicio pero se queda
+            // huérfano si el container se recrea (p. ej. al subir IMAGE_REV) →
+            // datos "perdidos". Migrar a `db-data/{container}` del host evita eso.
+            if self.db_has_volume(&name, &data_dir, datadir_in).await {
                 self.docker
                     .start_container(&name, None::<StartContainerOptions<String>>)
                     .await?;
@@ -205,14 +208,25 @@ impl DockerManager {
         Ok(name)
     }
 
-    /// ¿El container DB ya tiene montado su datadir en el host? (bind durable).
-    async fn db_has_volume(&self, name: &str, datadir_in: &str) -> bool {
+    /// ¿El container DB ya monta su datadir en NUESTRO bind durable del host?
+    /// Comprueba `source == host_dir` además del destino: un volumen anónimo de
+    /// Docker también monta en `datadir_in` pero NO es durable frente a recreado,
+    /// así que no debe contar como migrado.
+    async fn db_has_volume(
+        &self,
+        name: &str,
+        host_dir: &std::path::Path,
+        datadir_in: &str,
+    ) -> bool {
+        let host = host_dir.to_string_lossy();
         match self.docker.inspect_container(name, None).await {
             Ok(info) => info
                 .mounts
                 .map(|ms| {
-                    ms.iter()
-                        .any(|m| m.destination.as_deref() == Some(datadir_in))
+                    ms.iter().any(|m| {
+                        m.destination.as_deref() == Some(datadir_in)
+                            && m.source.as_deref() == Some(host.as_ref())
+                    })
                 })
                 .unwrap_or(false),
             Err(_) => false,
