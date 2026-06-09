@@ -90,6 +90,27 @@ pub struct CloneInfo {
     pub created_at: String,
 }
 
+/// Poblado si este sitio es un *worktree-project*: un proyecto ligero atado a un
+/// repo (theme/plugin) del padre, montado para probar una rama en aislamiento.
+/// El `public` del padre se comparte por montaje Docker; solo el repo objetivo
+/// (un `git worktree` sobre `branch`) y el `wp-config.php` propio se sobreponen.
+/// Ver `worktree.rs`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeInfo {
+    pub parent_id: String,
+    /// Basename del `path` del padre — nginx/docker lo usan para las rutas montadas.
+    pub parent_dirname: String,
+    /// Ruta del repo objetivo relativa a `public/` (ej. `wp-content/themes/mi-theme`).
+    pub target_path: String,
+    /// Rama del worktree (se crea nueva o se reusa una existente).
+    pub branch: String,
+    /// `true` = comparte el esquema DB del padre (constantes `WP_HOME`/`WP_SITEURL`
+    /// en el wp-config propio, sin mutar la DB); `false` = esquema propio copiado.
+    pub shared_db: bool,
+    pub created_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GithubRepo {
     pub repo: String,
@@ -155,6 +176,9 @@ pub struct SiteConfig {
     /// Poblado si este sitio es un clone temporal de otro.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clone_of: Option<CloneInfo>,
+    /// Poblado si este sitio es un worktree-project (ver `WorktreeInfo`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_of: Option<WorktreeInfo>,
     /// Rutas (relativas a `public_dir`) a excluir del tar del punto de guardado,
     /// además de las exclusiones fijas (uploads, cache, wp-config, *.log).
     /// P. ej. `wp-content/updraft`, `wp-content/ai1wm-backups`.
@@ -179,6 +203,23 @@ impl SiteConfig {
     pub fn sql_dir(&self) -> PathBuf {
         Path::new(&self.path).join("app").join("sql")
     }
+
+    /// Carpeta del host que alberga el(los) `git worktree` de un worktree-project
+    /// (`{path}/wt/`). Cada repo objetivo se chequea en `wt/{basename}`.
+    pub fn worktree_root(&self) -> PathBuf {
+        Path::new(&self.path).join("wt")
+    }
+
+    /// `wp-config.php` propio del worktree-project (se monta sobre el del padre).
+    pub fn worktree_wp_config(&self) -> PathBuf {
+        Path::new(&self.path).join("wp-config.php")
+    }
+}
+
+/// Último segmento de una ruta relativa estilo `wp-content/themes/mi-theme` →
+/// `mi-theme`. Lo usan docker/nginx para situar el `git worktree` del objetivo.
+pub fn path_basename(rel: &str) -> &str {
+    rel.trim_end_matches('/').rsplit('/').next().unwrap_or(rel)
 }
 
 // ---------------------------------------------------------------------------
@@ -536,6 +577,7 @@ mod tests {
             migration_pending: true,
             last_migrated_at: None,
             clone_of: None,
+            worktree_of: None,
             snapshot_excludes: vec![],
         }
     }

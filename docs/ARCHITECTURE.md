@@ -68,6 +68,23 @@ Nombre de DB compartida = `{prefix}-{version sin puntos}` (`DbType::service_pref
   queda ningún proyecto activo). **Resultado: N proyectos parados = 0 containers.**
 - **site_status**: `MigrationPending` si el flag; si no, según `wp-{id}` corre o no.
 
+### Worktree-projects (composición por montajes)
+Un worktree-project (`worktree.rs`) NO tiene su propio `public`: su container
+`wp-{id}` monta el `public` del **padre** en `/var/www/html` (compartido, rw) y
+sobrepone solo dos cosas:
+- el repo objetivo, un `git worktree` en `{path}/wt/{basename}` →
+  `/var/www/html/{targetPath}` (la rama nueva, aislada);
+- un `wp-config.php` propio (`{path}/wp-config.php`) →
+  `/var/www/html/wp-config.php` (dominio + BD del worktree).
+
+Docker ordena los binds por profundidad del destino, así el padre (raíz) se monta
+antes y los overrides quedan encima. nginx sirve los estáticos desde el `public`
+del padre (`root /srv/projects/{parentDir}/app/public`) y, para el objetivo, un
+`location ~ ^/{targetPath}/…\.(css|js|img…)$` con `alias` al `git worktree`, para
+que los assets de la rama se vean. La BD es la del padre (constantes
+`WP_HOME`/`WP_SITEURL` evitan mutarla) o una copia propia. Eliminar = `git
+worktree remove` (la rama persiste) + borrar carpeta: sin rastro.
+
 ### UID/GID (crítico)
 `www-data` en alpine = uid 82 ≠ host (1000). El `entrypoint.sh` de la imagen php
 ejecuta `usermod/groupmod` para alinear www-data a `PUID/PGID`. Sin esto WordPress
@@ -107,6 +124,7 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `dumplog.rs` | Log de volcados de DB (`config_dir/dump-log.jsonl`, JSONL `DumpLogEntry`): una línea por cada dump escrito en `app/sql/` para revisar y comparar. `append` (lo llaman auto-dump, export-al-detener y export manual con su `source`), `read_all` (más nuevos primero), `clean(before?, dbName?)` (poda por fecha y/o base de datos; sin filtros borra todo; no toca los `.sql`). |
 | `snapshot.rs` | Puntos de guardado por proyecto en `~/panel-wp/{slug}/snapshots/{id}/` (`code.tar.zst` sin uploads/cache/wp-config/logs + `db.sql` + `meta.json` con `label`). `create_snapshot` (arranca solo el motor DB), `list_snapshots` (orden desc por fecha), `delete_snapshot`. **Exclusiones extra por proyecto**: `SiteConfig::snapshot_excludes` (rel. a public) se añaden como `--exclude` al tar; `detect_excludable` sugiere carpetas (subcarpetas de wp-content + backups conocidos: UpdraftPlus, All-in-One WP Migration, WPvivid, Duplicator…) con tamaño y flag `known`. El `meta.json` registra los `excludes` aplicados. |
 | `clone.rs` | `create_clone(parent_id, snapshot_id)`: crea un `SiteConfig` con `clone_of` poblado desde un punto de guardado. Comparte engine DB + nginx; solo añade 1 container php + 1 schema. **Nombre del clone = `meta.label`** del punto de guardado; slug/carpeta/dominio derivan de esa etiqueta vía `slugify()` (`{parent_dirname}-{label_slug}`, desambiguación `-N` o UUID corto en `find_free_slot`). Uploads viejos servidos vía fallback nginx desde el padre (ro); los nuevos en la carpeta del clone (rw). En el dashboard el clone se muestra anidado bajo su padre (no como proyecto suelto). |
+| `worktree.rs` | `create_worktree(parent_id, target_path, branch, base_branch?, shared_db)`: proyecto de prueba ligero atado a un repo del padre. NO copia código — el `public` del padre se comparte por **montaje Docker** y solo se sobrepone el repo objetivo (un `git worktree` sobre `branch`, en `{path}/wt/{basename}`) y un `wp-config.php` propio (`{path}/wp-config.php`). BD compartida (constantes `WP_HOME`/`WP_SITEURL`, sin mutar la DB) o copia (dump+import del padre). `remove_worktree` hace `git worktree remove` (la rama queda en el repo del padre) + drop del esquema si era copia + borra la carpeta. `list_worktrees(parent_id)` filtra `SiteConfig.worktree_of`. El branch de `docker::create_php_container`/`nginx::render_vhost` materializa la composición (ver más abajo). |
 | `cli.rs` | `install_cli_wrapper`: copia `wp` y `wordpress-panel-cli` a `~/.local/bin` (chmod 755). El `wp` detecta el proyecto por el CWD vía `wordpress-panel-cli detect-project`. Se instala automáticamente al arrancar el panel (`run()` setup, idempotente), así no hay nada por-proyecto que instalar. `open_terminal_at`: lanza el primer emulador de terminal disponible (konsole, gnome-terminal, xfce4-terminal, kitty, alacritty, x-terminal-emulator) con cwd en la carpeta del proyecto. |
 | `integration_tests.rs` | Solo en `#[cfg(test)]`: tests de integración `#[ignore]` (Docker / import LocalWP hermético). Ver `docs/TESTING.md §A.2`. |
 
@@ -171,6 +189,9 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `detect_excludable` | `id` | `Vec<ExcludableEntry>` | Escanea `wp-content` y devuelve carpetas candidatas a excluir (subcarpetas + backups conocidos como UpdraftPlus/ai1wm), con tamaño y flag `known`. |
 | `set_snapshot_excludes` | `id, excludes` | `()` | Persiste en `config.json` las rutas (rel. a public) a excluir del tar del punto de guardado. |
 | `create_clone` | `id, snapshotId` | `SiteConfig` | Crea un clone temporal desde un punto de guardado; nombre = etiqueta del snapshot. Emite `op-log`. |
+| `create_worktree_site` | `parentId, targetPath, branch, baseBranch?, sharedDb` | `SiteConfig` | Crea un worktree-project (`git worktree` del repo `targetPath` sobre `branch`). Emite `op-log`. |
+| `remove_worktree_site` | `id, deleteBranch` | `()` | Elimina un worktree-project (`git worktree remove`; la rama queda salvo `deleteBranch`). Emite `op-log`. |
+| `list_worktrees` | `parentId` | `Vec<SiteConfig>` | Worktree-projects de un padre. |
 | `feature_stub` | `feature` | `String` (Err) | Stub Cloudflare/deploy/package (fase posterior). |
 
 **Eventos** (backend → frontend, vía `app.emit`): `log:{id}` — una línea de log de
@@ -202,6 +223,9 @@ interfaz `…Manager`:
 | `StopSite(id)` | `bool` | Detiene un proyecto. |
 | `StopAll` | `bool` | Detiene todos. |
 | `Quit` | — | Cierra el panel (`app.exit(0)`). |
+| `ListWorktrees(parentId)` | `String` (JSON) | Worktree-projects de un padre. |
+| `CreateWorktree(parentId, targetPath, branch, baseBranch, sharedDb)` | `String` (JSON `{ok,…}`) | Crea un worktree-project (lo usa el wrapper CLI). |
+| `RemoveWorktree(id, deleteBranch)` | `bool` | Elimina un worktree-project. |
 
 El plasmoid (`plasma/applets/wordpress-panel-plasmoid/`, Plasma 6) consulta cada
 3s vía `qdbus6` (DataSource `executable`) y pinta los proyectos activos con botón

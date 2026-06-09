@@ -52,6 +52,18 @@ export interface CloneInfo {
   createdAt: string;
 }
 
+/** Espejo de `config::WorktreeInfo`: metadatos de un worktree-project. */
+export interface WorktreeInfo {
+  parentId: string;
+  parentDirname: string;
+  /** Ruta del repo objetivo relativa a public (ej. wp-content/themes/mi-theme). */
+  targetPath: string;
+  branch: string;
+  /** true = comparte la DB del padre; false = copia propia. */
+  sharedDb: boolean;
+  createdAt: string;
+}
+
 export interface SiteConfig {
   id: string;
   name: string;
@@ -69,6 +81,8 @@ export interface SiteConfig {
   migrationPending: boolean;
   lastMigratedAt: string | null;
   cloneOf?: CloneInfo | null;
+  /** Poblado si este sitio es un worktree-project. */
+  worktreeOf?: WorktreeInfo | null;
   /** Rutas (relativas a public) excluidas del punto de guardado. */
   snapshotExcludes?: string[];
 }

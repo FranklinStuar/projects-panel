@@ -33,7 +33,28 @@ pub fn render_vhost(site: &SiteConfig) -> String {
     let upstream = format!("{}:9000", site.container_name());
     // nginx ve los archivos en /srv/projects (ro); php los ve en /var/www/html.
     let dirname = project_dirname(site);
-    let root = format!("/srv/projects/{dirname}/app/public");
+
+    // Worktree-project: la raíz son los estáticos del PADRE (montados igual que en
+    // el container php); el repo objetivo se sirve por `alias` desde el `git
+    // worktree`, para que sus assets nuevos se vean. El bloque va ANTES del static
+    // genérico para ganarle al match de regex. Ver worktree.rs.
+    let (root, worktree_block) = if let Some(ref wt) = site.worktree_of {
+        let parent = &wt.parent_dirname;
+        let target = wt.target_path.trim_matches('/');
+        let basename = crate::config::path_basename(target);
+        let block = format!(
+            r#"
+    location ~ ^/{target}/(.+\.(?:css|js|mjs|png|jpe?g|gif|svg|ico|webp|woff2?|ttf|eot|map|json))$ {{
+        alias /srv/projects/{dirname}/wt/{basename}/$1;
+        expires 7d;
+        access_log off;
+    }}
+"#
+        );
+        (format!("/srv/projects/{parent}/app/public"), block)
+    } else {
+        (format!("/srv/projects/{dirname}/app/public"), String::new())
+    };
 
     // Para clones: uploads nuevos en el clone (rw), uploads viejos del padre ro vía fallback.
     let uploads_block = if let Some(ref ci) = site.clone_of {
@@ -78,7 +99,7 @@ server {{
 
     location / {{
         try_files $uri $uri/ /index.php?$args;
-    }}{uploads_block}
+    }}{worktree_block}{uploads_block}
     location ~ \.php$ {{
         fastcgi_pass {upstream};
         fastcgi_index index.php;
@@ -106,7 +127,7 @@ server {{
 
     location / {{
         try_files $uri $uri/ /index.php?$args;
-    }}{uploads_block}
+    }}{worktree_block}{uploads_block}
     location ~ \.php$ {{
         fastcgi_pass {upstream};
         fastcgi_index index.php;
@@ -166,6 +187,7 @@ mod tests {
             migration_pending: false,
             last_migrated_at: None,
             clone_of: None,
+            worktree_of: None,
             snapshot_excludes: vec![],
         }
     }
@@ -210,6 +232,33 @@ mod tests {
         let conf = render_vhost(&site);
         assert!(conf.contains("@uploads_base"), "clone ssl debe tener @uploads_base");
         assert!(conf.contains("listen 443 ssl"), "debe tener SSL");
+    }
+
+    #[test]
+    fn vhost_worktree_root_padre_y_alias_objetivo() {
+        use crate::config::WorktreeInfo;
+        let mut site = base_site(true);
+        site.path = "/home/u/panel-wp/demo-feat".into();
+        site.domain = "demo-feat.test".into();
+        site.worktree_of = Some(WorktreeInfo {
+            parent_id: "parent1".into(),
+            parent_dirname: "demo".into(),
+            target_path: "wp-content/themes/mi-theme".into(),
+            branch: "feat/x".into(),
+            shared_db: true,
+            created_at: "2026-01-01T00:00:00Z".into(),
+        });
+        let conf = render_vhost(&site);
+        // root = padre; alias del objetivo = worktree del propio proyecto.
+        assert!(conf.contains("root /srv/projects/demo/app/public"), "root debe ser el del padre:\n{conf}");
+        assert!(
+            conf.contains("alias /srv/projects/demo-feat/wt/mi-theme/$1"),
+            "debe servir el objetivo por alias desde el worktree:\n{conf}"
+        );
+        assert!(
+            conf.contains("^/wp-content/themes/mi-theme/"),
+            "el location del objetivo debe usar la ruta del repo:\n{conf}"
+        );
     }
 }
 

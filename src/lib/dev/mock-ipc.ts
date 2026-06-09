@@ -242,6 +242,12 @@ export function installMockIpc() {
       case 'feature_stub':
         return `(mock) ${String(args.feature)} no disponible`;
 
+      case 'list_worktrees':
+        return [];
+      case 'create_worktree_site':
+      case 'remove_worktree_site':
+        return null;
+
       default:
         console.warn('[mock-ipc] comando no mockeado:', cmd, args);
         return null;

@@ -96,5 +96,24 @@ export const api = {
   setSnapshotExcludes: (id: string, excludes: string[]) =>
     invoke<void>('set_snapshot_excludes', { id, excludes }),
   createClone: (parentId: string, snapshotId: string) =>
-    invoke<SiteConfig>('create_clone', { parentId, snapshotId })
+    invoke<SiteConfig>('create_clone', { parentId, snapshotId }),
+  // Worktree-projects: probar una rama de un repo (theme/plugin) en aislamiento
+  createWorktreeSite: (
+    parentId: string,
+    targetPath: string,
+    branch: string,
+    sharedDb: boolean,
+    baseBranch?: string,
+  ) =>
+    invoke<SiteConfig>('create_worktree_site', {
+      parentId,
+      targetPath,
+      branch,
+      baseBranch: baseBranch ?? null,
+      sharedDb
+    }),
+  removeWorktreeSite: (id: string, deleteBranch: boolean) =>
+    invoke<void>('remove_worktree_site', { id, deleteBranch }),
+  listWorktrees: (parentId: string) =>
+    invoke<SiteConfig[]>('list_worktrees', { parentId })
 };

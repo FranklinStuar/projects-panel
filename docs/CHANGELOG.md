@@ -604,6 +604,36 @@ propias del proyecto) se podían colar en cada punto de guardado.
   de carpetas detectadas (tamaño + badge del plugin para las conocidas), campo para
   añadir rutas a mano y persistencia. Cada snapshot muestra cuántas carpetas excluyó.
 
+## Worktree-projects (probar una rama de un repo en aislamiento)
+
+Para trabajar un theme/plugin con `git worktree` hacía falta otro WordPress
+completo. Ahora un **worktree-project** es un proyecto de prueba ligero atado a
+un repo del proyecto principal y a una rama nueva, sin duplicar WordPress.
+
+- **`worktree.rs`** (`create_worktree`/`remove_worktree`/`list_worktrees`): crea
+  un `SiteConfig` con `worktree_of` (`config::WorktreeInfo`). NO copia código; el
+  repo objetivo se materializa como un `git worktree` sobre una rama nueva en
+  `{path}/wt/{basename}`, y se genera un `wp-config.php` propio. Al eliminar hace
+  `git worktree remove` (la rama queda en el repo del padre) y borra la carpeta:
+  sin rastro del proyecto de prueba.
+- **Composición por montajes Docker** (`docker::create_php_container`): el
+  container del worktree monta el `public` del PADRE en `/var/www/html`
+  (compartido) y sobrepone solo el `git worktree` del objetivo y el `wp-config.php`
+  propio. Cero copias, cero symlinks frágiles.
+- **nginx** (`render_vhost`): el `root` del vhost son los estáticos del padre; un
+  `location ~ ^/{target}/…(css|js|img…)$` con `alias` sirve los assets del
+  objetivo desde el worktree (para ver los cambios de la rama). Va antes del static
+  genérico para ganarle al match de regex.
+- **Base de datos**: compartida (constantes `WP_HOME`/`WP_SITEURL` en el wp-config
+  propio, sin mutar la DB del padre) o copia propia (dump + import del padre,
+  `fix_site_url`). Se pregunta al crear.
+- **Tres superficies**: comando IPC `create_worktree_site`/`remove_worktree_site`/
+  `list_worktrees` (+ `api.ts`, tipos `WorktreeInfo`/`SiteConfig.worktreeOf`); UI
+  en la pestaña Git/GitHub de `/site/[id]` (crear por repo + lista con eliminar);
+  y subcomando `wordpress-panel-cli worktree {list|create|remove}` que habla con
+  el panel en ejecución por D-Bus (`dbus.rs`: `CreateWorktree`/`RemoveWorktree`/
+  `ListWorktrees`).
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).
