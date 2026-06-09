@@ -22,6 +22,7 @@ mod snapshot;
 mod ssl;
 mod system;
 mod wordpress;
+mod worktree;
 mod wpcli;
 
 #[cfg(test)]
@@ -337,6 +338,7 @@ fn reconstruct_config(folder_name: &str, dir: &std::path::Path) -> SiteConfig {
         migration_pending: true,
         last_migrated_at: None,
         clone_of: None,
+        worktree_of: None,
         snapshot_excludes: vec![],
     }
 }
@@ -708,6 +710,55 @@ async fn create_clone(
         .map_err(e)
 }
 
+// -- Worktree-projects (probar una rama de un repo en aislamiento) ------------
+
+/// Crea un worktree-project del repo `target_path` del padre `parent_id` sobre la
+/// rama `branch` (desde `base_branch`, o la rama actual). `shared_db`: compartir
+/// el esquema del padre o copiarlo. Emite progreso por `op-log`.
+#[tauri::command]
+async fn create_worktree_site(
+    app: AppHandle,
+    parent_id: String,
+    target_path: String,
+    branch: String,
+    base_branch: Option<String>,
+    shared_db: bool,
+) -> CmdResult<SiteConfig> {
+    let docker = DockerManager::connect().map_err(e)?;
+    worktree::create_worktree(
+        &app,
+        &docker,
+        &parent_id,
+        &target_path,
+        &branch,
+        base_branch.as_deref(),
+        shared_db,
+    )
+    .await
+    .map_err(e)
+}
+
+/// Elimina un worktree-project: lo apaga, hace `git worktree remove` (la rama
+/// queda en el repo del padre), borra el esquema si era copia y borra la carpeta.
+/// `delete_branch`: además borrar la rama. Emite progreso por `op-log`.
+#[tauri::command]
+async fn remove_worktree_site(
+    app: AppHandle,
+    id: String,
+    delete_branch: bool,
+) -> CmdResult<()> {
+    let docker = DockerManager::connect().map_err(e)?;
+    worktree::remove_worktree(&app, &docker, &id, delete_branch)
+        .await
+        .map_err(e)
+}
+
+/// Lista los worktree-projects de un proyecto padre.
+#[tauri::command]
+fn list_worktrees(parent_id: String) -> CmdResult<Vec<SiteConfig>> {
+    worktree::list_worktrees(&parent_id).map_err(e)
+}
+
 fn load_site(id: &str) -> CmdResult<SiteConfig> {
     config::find_site(id)
         .map_err(e)?
@@ -910,7 +961,10 @@ pub fn run() {
             delete_snapshot,
             detect_excludable,
             set_snapshot_excludes,
-            create_clone
+            create_clone,
+            create_worktree_site,
+            remove_worktree_site,
+            list_worktrees
         ])
         .run(tauri::generate_context!())
         .expect("error al arrancar la aplicación Tauri");

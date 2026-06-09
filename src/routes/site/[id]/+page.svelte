@@ -4,7 +4,7 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import { api } from '$lib/api';
-  import type { SiteState, GhStatus, DetectedRepo, Endpoint, SnapshotMeta, ExcludableEntry, WpUser } from '$lib/types';
+  import type { SiteState, SiteConfig, GhStatus, DetectedRepo, Endpoint, SnapshotMeta, ExcludableEntry, WpUser } from '$lib/types';
   import OpConsole from '$lib/components/OpConsole.svelte';
   import DeleteProjectModal from '$lib/components/DeleteProjectModal.svelte';
 
@@ -69,6 +69,15 @@
   // Clone en curso (OpConsole)
   let cloneConsoleOpen = $state(false);
   let cloning = $state(false);
+  // Worktree-projects (probar una rama de un repo en aislamiento)
+  let worktrees = $state<SiteConfig[]>([]);
+  let wtTargetPath = $state('');
+  let wtBranch = $state('');
+  let wtBaseBranch = $state('');
+  let wtSharedDb = $state(true);
+  let wtConsoleOpen = $state(false);
+  let wtRunning = $state(false);
+  let wtHelpOpen = $state(false);
   // Exclusiones del punto de guardado
   let showExcludes = $state(false);
   let excludable = $state<ExcludableEntry[]>([]);
@@ -389,6 +398,56 @@
       ghError = String(e);
     }
     await scanRepos();
+    await loadWorktrees();
+  }
+
+  async function loadWorktrees() {
+    try {
+      worktrees = await api.listWorktrees(id);
+      if (!wtTargetPath && detected.length) wtTargetPath = detected[0].path;
+    } catch (e) {
+      ghError = String(e);
+    }
+  }
+
+  async function createWorktree() {
+    if (!wtTargetPath || !wtBranch.trim()) return;
+    wtRunning = true;
+    wtConsoleOpen = true;
+    error = null;
+    try {
+      const wt = await api.createWorktreeSite(
+        id,
+        wtTargetPath,
+        wtBranch.trim(),
+        wtSharedDb,
+        wtBaseBranch.trim() || undefined,
+      );
+      await goto(`/site/${wt.id}`);
+    } catch (err) {
+      error = String(err);
+    } finally {
+      wtRunning = false;
+    }
+  }
+
+  async function removeWorktree(wtId: string, branch: string) {
+    if (
+      !confirm(
+        `¿Eliminar el worktree «${branch}»?\n\nSe borrará el proyecto de prueba y su container, pero la RAMA se conserva en el proyecto principal para seguir trabajándola.`,
+      )
+    )
+      return;
+    wtRunning = true;
+    wtConsoleOpen = true;
+    try {
+      await api.removeWorktreeSite(wtId, false);
+      await loadWorktrees();
+    } catch (err) {
+      error = String(err);
+    } finally {
+      wtRunning = false;
+    }
   }
 
   async function scanRepos() {
@@ -745,6 +804,115 @@
       </div>
       <input class="mt-2 w-full rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900" placeholder="ruta custom relativa a public/ (opcional; ignora la categoría)" bind:value={clonePath} />
     {/if}
+
+    <!-- Worktrees: probar una rama de un repo en aislamiento -->
+    <hr class="my-5 border-zinc-200 dark:border-zinc-800" />
+    {#if site.config.worktreeOf}
+      <div class="rounded border border-violet-300 bg-violet-50 px-3 py-2 text-sm text-violet-800 dark:border-violet-900/60 dark:bg-violet-950/40 dark:text-violet-300">
+        Este proyecto <strong>es un worktree</strong> de otro (rama
+        <code class="rounded bg-violet-200/60 px-1 dark:bg-violet-900/60">{site.config.worktreeOf.branch}</code>
+        sobre <code class="rounded bg-violet-200/60 px-1 dark:bg-violet-900/60">{site.config.worktreeOf.targetPath}</code>).
+        Comparte el código del proyecto principal por montaje; solo el repo objetivo es independiente.
+        Elimínalo desde el proyecto principal cuando termines — la rama quedará guardada.
+      </div>
+    {:else}
+      <div class="mb-2 flex items-center justify-between">
+        <h3 class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Worktrees ({worktrees.length})</h3>
+        <button
+          class="flex h-5 w-5 items-center justify-center rounded-full border border-zinc-300 text-xs font-bold text-zinc-500 hover:bg-zinc-100 dark:border-zinc-600 dark:hover:bg-zinc-800"
+          title="¿Qué es esto?"
+          aria-label="¿Qué es un worktree?"
+          aria-expanded={wtHelpOpen}
+          onclick={() => (wtHelpOpen = !wtHelpOpen)}>?</button>
+      </div>
+      <p class="mb-3 text-xs text-zinc-500">
+        Crea un proyecto de prueba ligero atado a un repo y una <strong>rama nueva</strong>. El resto de WordPress
+        se comparte (sin copiar); solo el repo objetivo es un <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">git worktree</code>
+        independiente con su propia URL. Al eliminarlo, la rama queda en el proyecto principal.
+      </p>
+
+      {#if wtHelpOpen}
+        <div class="mb-4 rounded-lg border border-violet-200 bg-violet-50 p-4 text-sm leading-relaxed text-zinc-700 dark:border-violet-900/50 dark:bg-violet-950/30 dark:text-zinc-300">
+          <div class="mb-2 flex items-center justify-between">
+            <h4 class="font-semibold text-violet-800 dark:text-violet-300">¿Qué es un worktree y para qué sirve?</h4>
+            <button class="text-xs text-zinc-500 underline" onclick={() => (wtHelpOpen = false)}>Cerrar</button>
+          </div>
+
+          <p class="mb-2">
+            En Git, cada rama suele compartir <em>una sola carpeta</em> de trabajo: para cambiar de rama haces
+            <code class="rounded bg-violet-200/60 px-1 dark:bg-violet-900/60">git checkout</code> y los archivos de esa carpeta se reemplazan.
+            Un <strong>worktree</strong> es una carpeta <em>extra</em> del mismo repo donde tienes
+            <strong>otra rama abierta a la vez</strong>, sin tocar tu carpeta principal.
+          </p>
+
+          <p class="mb-2">
+            El problema en WordPress: para probar esa otra rama de tu theme o plugin necesitarías
+            <strong>otro WordPress completo</strong> (base de datos, core, plugins…). Montar todo eso solo para una prueba es pesado.
+          </p>
+
+          <p class="mb-1 font-medium text-violet-800 dark:text-violet-300">Lo que hace este botón:</p>
+          <ul class="mb-2 ml-4 list-disc space-y-1">
+            <li>Crea la <strong>rama nueva</strong> y la abre en un worktree, <strong>sin copiar</strong> todo WordPress: el resto del sitio se comparte con el proyecto principal.</li>
+            <li>Te da una <strong>URL propia</strong> para ver esa rama funcionando, separada del sitio principal.</li>
+            <li>Puedes <strong>compartir la base de datos</strong> del proyecto principal o usar una <strong>copia</strong> (para cambiar datos sin riesgo hasta que la rama esté lista).</li>
+            <li>Al terminar, eliminas el worktree y <strong>la rama se queda guardada</strong> en el proyecto principal para seguir con ella. No queda rastro del proyecto de prueba.</li>
+          </ul>
+
+          <p class="mb-2">
+            <span class="font-medium">En resumen:</span> pruebas una rama de tu theme/plugin de forma aislada, con su propia URL,
+            sin duplicar el sitio ni ensuciar el proyecto principal — y deshaces todo con un clic conservando tu trabajo.
+          </p>
+
+          <p class="text-xs text-zinc-500">
+            <strong>Base de datos compartida</strong>: ves los mismos contenidos que el sitio principal (ideal para cambios solo de código/diseño).
+            <strong>Copia</strong>: una base de datos propia que puedes modificar libremente sin afectar al principal.
+          </p>
+        </div>
+      {/if}
+
+      {#if worktrees.length}
+        <div class="mb-4 flex flex-col gap-2">
+          {#each worktrees as w (w.id)}
+            <div class="flex items-center justify-between gap-2 rounded border border-violet-200 px-3 py-2 text-sm dark:border-violet-900/50">
+              <div class="min-w-0">
+                <div class="truncate font-medium">{w.worktreeOf?.branch}</div>
+                <div class="truncate text-xs text-zinc-500">
+                  {w.worktreeOf?.targetPath} · {w.domain} · BD {w.worktreeOf?.sharedDb ? 'compartida' : 'copia'}
+                </div>
+              </div>
+              <div class="flex shrink-0 gap-2">
+                <button class="rounded bg-zinc-200 px-2 py-1 text-xs dark:bg-zinc-800" disabled={ghBusy}
+                  onclick={() => goto(`/site/${w.id}`)}>Abrir</button>
+                <button class="rounded px-2 py-1 text-xs text-red-500" disabled={wtRunning} title="Eliminar worktree (conserva la rama)"
+                  onclick={() => removeWorktree(w.id, w.worktreeOf?.branch ?? '')}>✕</button>
+              </div>
+            </div>
+          {/each}
+        </div>
+      {/if}
+
+      {#if detected.length === 0}
+        <p class="text-sm text-zinc-500">Necesitas al menos un repo git en <code>wp-content</code> para crear un worktree.</p>
+      {:else}
+        <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Nuevo worktree</h3>
+        <div class="flex flex-wrap gap-2 text-sm">
+          <select class="min-w-44 flex-1 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" bind:value={wtTargetPath}>
+            {#each detected as r (r.path)}
+              <option value={r.path}>{r.name} ({r.path})</option>
+            {/each}
+          </select>
+          <input class="w-40 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" placeholder="rama nueva" bind:value={wtBranch} />
+          <input class="w-32 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" placeholder="base (opcional)" bind:value={wtBaseBranch} />
+          <button class="rounded bg-violet-600 px-3 py-1 font-medium text-white disabled:opacity-50" disabled={wtRunning || !wtBranch.trim()}
+            onclick={createWorktree}>Crear worktree</button>
+        </div>
+        <label class="mt-2 flex items-center gap-2 text-sm">
+          <input type="checkbox" bind:checked={wtSharedDb} />
+          Compartir la base de datos del proyecto principal
+          <span class="text-xs text-zinc-500">(desmarca para una copia aislada y poder cambiar datos sin afectar al principal)</span>
+        </label>
+      {/if}
+    {/if}
   {:else if tab === 'svc'}
     {#if svcErr}
       <div class="mb-3 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">{svcErr}</div>
@@ -1010,6 +1178,7 @@
 <OpConsole open={consoleOpen} running={migrating} title="Migración" onClose={() => (consoleOpen = false)} />
 <OpConsole open={snapshotConsoleOpen} running={snapshotRunning} title="Punto de guardado" onClose={() => (snapshotConsoleOpen = false)} />
 <OpConsole open={cloneConsoleOpen} running={cloning} title="Crear clone" onClose={() => (cloneConsoleOpen = false)} />
+<OpConsole open={wtConsoleOpen} running={wtRunning} title="Worktree" onClose={() => (wtConsoleOpen = false)} />
 
 <DeleteProjectModal bind:site={deleteTarget} onClose={(deleted) => deleted && goto('/')} />
 

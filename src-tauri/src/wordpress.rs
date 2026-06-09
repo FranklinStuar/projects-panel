@@ -145,6 +145,7 @@ pub async fn create_site(docker: &DockerManager, req: NewSiteRequest) -> Result<
         migration_pending: false,
         last_migrated_at: None,
         clone_of: None,
+        worktree_of: None,
         snapshot_excludes: vec![],
     };
 

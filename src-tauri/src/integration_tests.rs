@@ -295,6 +295,7 @@ fn site_config(id: &str, name: &str, path: &std::path::Path) -> SiteConfig {
         migration_pending: false,
         last_migrated_at: None,
         clone_of: None,
+        worktree_of: None,
         snapshot_excludes: vec![],
     }
 }
@@ -336,6 +337,7 @@ async fn db_lifecycle_idempotente() {
         migration_pending: false,
         last_migrated_at: None,
         clone_of: None,
+        worktree_of: None,
         snapshot_excludes: vec![],
     };
 

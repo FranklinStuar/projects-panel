@@ -100,6 +100,7 @@ async fn run<R: Runtime>(
             snapshot_id: snapshot_id.to_string(),
             created_at: Utc::now().to_rfc3339(),
         }),
+        worktree_of: None,
         snapshot_excludes: parent.snapshot_excludes.clone(),
     };
 
@@ -267,6 +268,7 @@ mod tests {
             migration_pending: false,
             last_migrated_at: None,
             clone_of: None,
+            worktree_of: None,
             snapshot_excludes: vec![],
         }
     }

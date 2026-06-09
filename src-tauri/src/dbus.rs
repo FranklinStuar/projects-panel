@@ -80,6 +80,68 @@ impl Manager {
     async fn quit(&self) {
         self.app.exit(0);
     }
+
+    // -- Worktrees (los usa el wrapper `wordpress-panel-cli worktree`) --------
+
+    /// Worktrees de un proyecto padre, como JSON `[{id,name,domain,branch,targetPath,sharedDb}]`.
+    async fn list_worktrees(&self, parent_id: String) -> String {
+        let sites = crate::worktree::list_worktrees(&parent_id).unwrap_or_default();
+        let out: Vec<_> = sites
+            .into_iter()
+            .map(|s| {
+                let w = s.worktree_of.expect("list_worktrees solo devuelve worktrees");
+                serde_json::json!({
+                    "id": s.id,
+                    "name": s.name,
+                    "domain": s.domain,
+                    "branch": w.branch,
+                    "targetPath": w.target_path,
+                    "sharedDb": w.shared_db,
+                })
+            })
+            .collect();
+        serde_json::to_string(&out).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Crea un worktree-project. `base_branch` vacío = rama actual del repo.
+    /// Devuelve JSON `{ok,id,domain}` o `{ok:false,error}`.
+    async fn create_worktree(
+        &self,
+        parent_id: String,
+        target_path: String,
+        branch: String,
+        base_branch: String,
+        shared_db: bool,
+    ) -> String {
+        let docker = match DockerManager::connect() {
+            Ok(d) => d,
+            Err(e) => return err_json(&e.to_string()),
+        };
+        let base = (!base_branch.trim().is_empty()).then_some(base_branch.as_str());
+        match crate::worktree::create_worktree(
+            &self.app, &docker, &parent_id, &target_path, &branch, base, shared_db,
+        )
+        .await
+        {
+            Ok(s) => serde_json::json!({ "ok": true, "id": s.id, "domain": s.domain }).to_string(),
+            Err(e) => err_json(&format!("{e:#}")),
+        }
+    }
+
+    /// Elimina un worktree-project. `delete_branch`: además borrar la rama.
+    async fn remove_worktree(&self, id: String, delete_branch: bool) -> bool {
+        let docker = match DockerManager::connect() {
+            Ok(d) => d,
+            Err(_) => return false,
+        };
+        crate::worktree::remove_worktree(&self.app, &docker, &id, delete_branch)
+            .await
+            .is_ok()
+    }
+}
+
+fn err_json(msg: &str) -> String {
+    serde_json::json!({ "ok": false, "error": msg }).to_string()
 }
 
 /// Arranca el servidor D-Bus y devuelve la conexión (mantenerla viva).

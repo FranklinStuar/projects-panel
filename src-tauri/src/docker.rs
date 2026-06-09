@@ -694,18 +694,44 @@ impl DockerManager {
 
     async fn create_php_container(&self, site: &SiteConfig, image: &str) -> Result<()> {
         let (uid, gid) = host_uid_gid();
-        let public = site.public_dir();
         let php_ini = site.php_ini();
         let wp_cli = crate::php::wp_cli_phar_path().await?;
 
-        let binds = vec![
-            format!("{}:/var/www/html", public.display()),
-            format!(
-                "{}:/usr/local/etc/php/conf.d/zz-project.ini:ro",
-                php_ini.display()
-            ),
-            format!("{}:/usr/local/bin/wp:ro", wp_cli.display()),
-        ];
+        // Worktree-project: en vez de su propio `public`, monta el del PADRE en
+        // /var/www/html (compartido) y sobrepone solo el repo objetivo (su `git
+        // worktree`) y un wp-config.php propio. Ver `worktree.rs`.
+        let binds = if let Some(wt) = &site.worktree_of {
+            let parent = crate::config::find_site(&wt.parent_id)?
+                .ok_or_else(|| anyhow!("padre {} del worktree no encontrado", wt.parent_id))?;
+            let parent_public = parent.public_dir();
+            let target_name = crate::config::path_basename(&wt.target_path);
+            let wt_target = site.worktree_root().join(target_name);
+            vec![
+                // Docker ordena los montajes por profundidad del destino, así que
+                // el padre (raíz) se monta antes y los overrides quedan encima.
+                format!("{}:/var/www/html", parent_public.display()),
+                format!("{}:/var/www/html/{}", wt_target.display(), wt.target_path),
+                format!(
+                    "{}:/var/www/html/wp-config.php",
+                    site.worktree_wp_config().display()
+                ),
+                format!(
+                    "{}:/usr/local/etc/php/conf.d/zz-project.ini:ro",
+                    php_ini.display()
+                ),
+                format!("{}:/usr/local/bin/wp:ro", wp_cli.display()),
+            ]
+        } else {
+            let public = site.public_dir();
+            vec![
+                format!("{}:/var/www/html", public.display()),
+                format!(
+                    "{}:/usr/local/etc/php/conf.d/zz-project.ini:ro",
+                    php_ini.display()
+                ),
+                format!("{}:/usr/local/bin/wp:ro", wp_cli.display()),
+            ]
+        };
 
         let env = vec![format!("PUID={uid}"), format!("PGID={gid}")];
 

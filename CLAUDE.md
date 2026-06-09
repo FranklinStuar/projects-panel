@@ -98,6 +98,14 @@ scripts/                 first-run.sh, wp-wrapper.sh, wordpress-panel-cli.sh
   sí. La capability está en `src-tauri/capabilities/default.json` (autodescubierta).
   Si un listener (p. ej. `OpConsole` con `op-log`) sale vacío, revísala primero.
 - **Container por proyecto NO publica puertos al host** — solo `panel-nginx` lo hace.
+- **Worktree-projects** (`worktree.rs`): un proyecto de prueba ligero atado a un
+  repo del padre. NO copia código: comparte el `public` del padre por **montaje
+  Docker** y sobrepone solo el `git worktree` del repo objetivo (rama nueva, en
+  `{path}/wt/{basename}`) y un `wp-config.php` propio. La BD se comparte (constantes
+  `WP_HOME`/`WP_SITEURL`, NUNCA mutar la DB del padre) o se copia. Al eliminar:
+  `git worktree remove` (la rama queda) + borrar carpeta. Si tocas montajes o
+  vhosts, respeta el branch `worktree_of` en `docker::create_php_container` y
+  `nginx::render_vhost`.
 - **Naming de containers**: proyecto = `wp-{site-id}`; compartidos = `panel-*`.
 - **Estado de recursos**: al detener un proyecto, apagar también los compartidos
   que ya no use ningún activo (`teardown_unused_shared`). Nunca dejar algo
@@ -110,7 +118,11 @@ sistema (`system.rs`), migración entre sistemas + export-al-detener
 (`migrate.rs`, `backup::rotate_dumps`), import desde LocalWP (`localwp.rs`) y
 empaquetado del plasmoid (`scripts/package-plasmoid.sh`). Visor de DB compartido
 `panel-adminer` (Adminer 4 para MySQL/MariaDB/Postgres) con auto-login en cero
-clics vía `docker/adminer/autologin.php` (comando `open_adminer`). Pendiente: Fase 5 (IA, `agent.rs`). Ver `docs/CHANGELOG.md` para
+clics vía `docker/adminer/autologin.php` (comando `open_adminer`). Puntos de
+guardado + clones temporales (`snapshot.rs`, `clone.rs`) y **worktree-projects**
+(`worktree.rs`: probar una rama de un theme/plugin en aislamiento por montajes,
+sin duplicar WordPress; IPC + UI en Git/GitHub + `wordpress-panel-cli worktree`).
+Pendiente: Fase 5 (IA, `agent.rs`). Ver `docs/CHANGELOG.md` para
 el detalle. Diferido dentro de Fase 3:
 container de frontend headless y plugin S3 (WP↔MinIO). Limitaciones/temas
 diferidos en `docs/KNOWN_ISSUES.md`: botones de la barra de título, verificación
