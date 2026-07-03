@@ -28,6 +28,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let sites = initialSites();
 let localSites = initialLocalSites();
 let disconnectedSites = initialDisconnectedSites();
+// Lista de grupos persistidos (espejo de groups.json). Como el backend real,
+// arranca VACÍA: los grupos derivados de `config.group` los fusiona el frontend
+// y desaparecen al quedar sin proyectos; aquí solo se acumulan los creados a
+// mano (botón «+») o asignados por drag&drop (set_site_group).
+let groups: string[] = [];
 const status = { ...systemStatus };
 
 function find(id: string): SiteState | undefined {
@@ -178,8 +183,36 @@ export function installMockIpc() {
       case 'set_site_group': {
         const s = find(id);
         if (s) s.config.group = (args.group as string | null) ?? null;
+        if (s?.config.group && !groups.includes(s.config.group)) groups.push(s.config.group);
         return s?.config;
       }
+
+      // --- grupos (groups.json) ---
+      case 'list_groups':
+        return [...groups];
+      case 'create_group': {
+        const name = String(args.name ?? '').trim();
+        if (name && !groups.includes(name)) groups.push(name);
+        return null;
+      }
+      case 'rename_group': {
+        const oldName = String(args.old ?? '');
+        const newName = String(args.new ?? '').trim();
+        if (newName) {
+          groups = [...new Set(groups.map((g) => (g === oldName ? newName : g)))];
+          for (const s of sites) if (s.config.group === oldName) s.config.group = newName;
+        }
+        return null;
+      }
+      case 'delete_group': {
+        const name = String(args.name ?? '');
+        groups = groups.filter((g) => g !== name);
+        for (const s of sites) if (s.config.group === name) s.config.group = null;
+        return null;
+      }
+      case 'reorder_groups':
+        groups = [...new Set((args.order as string[]).map((g) => g.trim()).filter(Boolean))];
+        return null;
       case 'set_site_minio': {
         const s = find(id);
         if (s) s.config.minio = args.enabled as boolean;

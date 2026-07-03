@@ -11,6 +11,7 @@ mod docker;
 mod domain;
 mod dumplog;
 mod github;
+mod groups;
 mod localwp;
 mod logs;
 mod migrate;
@@ -526,8 +527,44 @@ async fn regenerate_ssl(id: String) -> CmdResult<()> {
 async fn set_site_group(id: String, group: Option<String>) -> CmdResult<SiteConfig> {
     let mut site = load_site(&id)?;
     site.group = group.filter(|g| !g.trim().is_empty());
+    // Asegura que un grupo asignado por drag&drop quede registrado en groups.json.
+    if let Some(g) = &site.group {
+        groups::create(g).map_err(e)?;
+    }
     config::write_site_config(&site).map_err(e)?;
     Ok(site)
+}
+
+// -- Grupos de proyectos (groups.json) ---------------------------------------
+
+/// Lista de grupos persistidos, en orden.
+#[tauri::command]
+async fn list_groups() -> CmdResult<Vec<String>> {
+    groups::list().map_err(e)
+}
+
+/// Crea un grupo vacío (idempotente).
+#[tauri::command]
+async fn create_group(name: String) -> CmdResult<()> {
+    groups::create(&name).map_err(e)
+}
+
+/// Renombra un grupo y reasigna los proyectos que lo tenían.
+#[tauri::command]
+async fn rename_group(old: String, new: String) -> CmdResult<()> {
+    groups::rename(&old, &new).map_err(e)
+}
+
+/// Borra un grupo; sus proyectos quedan sin grupo.
+#[tauri::command]
+async fn delete_group(name: String) -> CmdResult<()> {
+    groups::delete(&name).map_err(e)
+}
+
+/// Sobrescribe el orden de los grupos.
+#[tauri::command]
+async fn reorder_groups(order: Vec<String>) -> CmdResult<()> {
+    groups::reorder(order).map_err(e)
 }
 
 // -- Fase 3: servicios adicionales -------------------------------------------
@@ -947,6 +984,11 @@ pub fn run() {
             open_vscode,
             regenerate_ssl,
             set_site_group,
+            list_groups,
+            create_group,
+            rename_group,
+            delete_group,
+            reorder_groups,
             set_site_minio,
             export_db,
             dump_log,

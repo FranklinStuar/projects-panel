@@ -72,6 +72,13 @@ export const api = {
   regenerateSsl: (id: string) => invoke<void>('regenerate_ssl', { id }),
   setSiteGroup: (id: string, group: string | null) =>
     invoke<SiteConfig>('set_site_group', { id, group }),
+  // Grupos de proyectos (groups.json): lista ordenada + altas/bajas/orden.
+  listGroups: () => invoke<string[]>('list_groups'),
+  createGroup: (name: string) => invoke<void>('create_group', { name }),
+  renameGroup: (old: string, name: string) =>
+    invoke<void>('rename_group', { old, new: name }),
+  deleteGroup: (name: string) => invoke<void>('delete_group', { name }),
+  reorderGroups: (order: string[]) => invoke<void>('reorder_groups', { order }),
   // Fase 3
   setSiteMinio: (id: string, enabled: boolean) =>
     invoke<SiteConfig>('set_site_minio', { id, enabled }),
