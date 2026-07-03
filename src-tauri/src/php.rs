@@ -14,8 +14,8 @@ const WP_CLI_URL: &str =
 /// Revisión de la imagen: forma parte del tag (`panel-php:{ver}-{rev}`). Súbela
 /// cuando cambie `docker/php/Dockerfile` para forzar reconstrucción — el tag
 /// nuevo no existe, así `ensure_php_image` reconstruye y `start_site` recrea los
-/// containers que aún usen el tag viejo. (r2: añade mariadb-client para WP-CLI.)
-pub const IMAGE_REV: &str = "r2";
+/// containers que aún usen el tag viejo. (r3: añade libwebp para soporte WebP en GD.)
+pub const IMAGE_REV: &str = "r3";
 
 /// Construye (si falta) y devuelve el tag de la imagen php para una versión.
 pub async fn ensure_php_image(version: &str) -> Result<String> {
