@@ -634,6 +634,40 @@ un repo del proyecto principal y a una rama nueva, sin duplicar WordPress.
   el panel en ejecución por D-Bus (`dbus.rs`: `CreateWorktree`/`RemoveWorktree`/
   `ListWorktrees`).
 
+## Rediseño UI — master-detail estilo LocalWP
+
+La UI pasó de páginas-ruta sueltas (dashboard + `/site/[id]` con cabecera
+saturada) a un layout de 3 columnas tipo LocalWP, manteniendo las reglas de
+recursos (sin dependencias nuevas: drag&drop nativo HTML5, íconos SVG inline).
+
+- **Riel de íconos** (`+layout.svelte`): sustituye los links de texto del sidebar
+  por un riel angosto con íconos de Proyectos/Dominios/Servicios/Configuración
+  (sección activa por `pathname`) + botón «+» Nuevo proyecto. El `<main>` ya no
+  fuerza padding en `/` (el master-detail gestiona su propio layout).
+- **Master-detail de proyectos** (`+page.svelte`): columna izquierda con la lista
+  agrupada (power/estado como íconos, fila seleccionable que resalta) y panel
+  grande con el detalle del proyecto **seleccionado por estado** (`selectedId`,
+  sin cambiar de URL). Se elimina la navegación a `/site/[id]` en el flujo normal.
+- **`ProjectDetail.svelte`**: el cuerpo del antiguo `/site/[id]` extraído a un
+  componente reutilizable (`id` por prop; callbacks `onChanged`/`onDeleted`/
+  `onSelect`). Cabecera descongestionada: una sola acción primaria
+  encender/detener, acciones secundarias (Abrir carpeta, Punto de guardado,
+  Regenerar SSL, Eliminar) en un menú «···», y accesos rápidos (web/admin/carpeta)
+  bajo el nombre. El **selector de usuario de auto-login se movió a la pestaña
+  Info** (fila "One-click admin"). `/site/[id]` queda como wrapper fino para
+  deep-links.
+- **Grupos persistentes** (`groups.rs` + `groups.json`): la asignación de grupo
+  dejó de ser un input dentro del proyecto; ahora se hace por **drag&drop** de la
+  fila sobre la cabecera del grupo (`set_site_group`). Un botón «+» crea grupos
+  (incl. vacíos) que persisten con su orden. Comandos `list/create/rename/delete/
+  reorder_groups` (+ `api.ts` + mock IPC).
+- **Grupos plegables**: cada cabecera de grupo se contrae/expande (estado
+  persistido en `localStorage`) para mostrar solo los que interesan; muestra el
+  conteo de proyectos.
+- **Encendidos al inicio**: sección "En ejecución" fija arriba de la lista con los
+  proyectos `running` (no se duplican: salen de su grupo mientras corren y vuelven
+  al pararse), para no buscarlos entre todos.
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).

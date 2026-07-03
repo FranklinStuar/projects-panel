@@ -1,15 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// Importar proyecto: el botón "Importar proyecto" del dashboard abre un modal
+// Importar proyecto: el botón "Importar proyecto" (pie de la lista) abre un modal
 // que lista las carpetas de ~/panel-wp/ desconectadas del panel. "Importar"
 // re-conecta una y la deja como "pendiente de migración". Ver docs/TESTING.md §C.
-
-// Fila (card) de un proyecto en el dashboard.
-function card(page: Page, name: string) {
-  return page
-    .locator('div.justify-between')
-    .filter({ has: page.getByRole('link', { name, exact: true }) });
-}
 
 async function openModal(page: Page) {
   await page.goto('/');
@@ -27,7 +20,7 @@ test('el modal lista las carpetas desconectadas con su badge', async ({ page }) 
   await expect(dialog).toContainText('reconstruido');
 });
 
-test('importar deja el proyecto pendiente de migración en el dashboard', async ({ page }) => {
+test('importar deja el proyecto pendiente de migración en la lista', async ({ page }) => {
   const dialog = await openModal(page);
 
   // Importa la carpeta con config conservada.
@@ -46,8 +39,7 @@ test('importar deja el proyecto pendiente de migración en el dashboard', async 
   await dialog.getByRole('button', { name: 'Cerrar' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
 
-  // El proyecto aparece en el dashboard como pendiente de migración.
-  await expect(
-    card(page, 'Cliente Antiguo').getByRole('button', { name: 'Migrar y encender' })
-  ).toBeVisible();
+  // El proyecto aparece en la lista; al seleccionarlo, su detalle ofrece migrar.
+  await page.getByText('Cliente Antiguo', { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Migrar y encender' })).toBeVisible();
 });

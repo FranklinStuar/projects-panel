@@ -105,6 +105,7 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `config.rs` | Modelos (`SiteConfig`, `Services`, `DbType`, `SiteStatus`, `SiteState`), rutas (`config_dir`, `projects_root`), persistencia (`load_all_sites`, `read/write_site_config`, `find_site`). **`Endpoint`** (dónde publica el panel en el host: `loopbackIp`/`httpPort`/`httpsPort`, helper `site_url`) + `PanelConfig` persistido en `panel.json` (`load/save_endpoint`, `endpoint_or_default`). |
 | `docker.rs` | `DockerManager` (bollard): red, ensure_db/ensure_nginx, start/stop_site, teardown, `exec`/`exec_as` (fija usuario; chequea exit code), helpers uid/gid e imagen-context. `wait_db_ready` (gatea sobre TCP antes de usar la DB). `ensure_db` bindea el datadir a un dir durable del host (`db_data_dir` → `config_dir/db-data/{container}`, montado en `DbType::datadir()`) y migra containers legados sin bind (`migrate_db_to_volume` vía `docker cp` + recreado; `db_has_volume` detecta el bind). Selección de endpoint (`select_endpoint`/`autoselect_endpoint`/`preflight_endpoint`) con autodetección de puerto libre. |
 | `nginx.rs` | Render/escritura/borrado de vhosts en `~/.config/wordpress-panel/nginx/conf.d/`. |
+| `groups.rs` | Lista durable de grupos de proyectos en `config_dir/groups.json` (`{ order: [...] }`). `list/create/rename/delete/reorder`. La pertenencia sigue en `SiteConfig::group`; este archivo solo aporta el conjunto de grupos conocidos (incl. vacíos) y su orden. `rename`/`delete` reescriben los `config.json` afectados; `set_site_group` registra el grupo destino aquí al asignarlo por drag&drop. |
 | `php.rs` | `ensure_php_image` (docker build por versión), `wp_cli_phar_path` (descarga el phar). |
 | `domain.rs` | dnsmasq wildcard `*.test`: snippet + detección de resolución (`resolves_to`). Regla parametrizada por IP (`wildcard_rule`); `install_wildcard` la instala vía `pkexec` y recarga NetworkManager (para endpoint con IP loopback alterna). |
 | `migrate.rs` | `migrate_site()`: provisiona un proyecto `migrationPending` en el sistema actual (crea DB, regenera wp-config, importa el último dump de `app/sql/`, fija `home`/`siteurl`, regenera SSL) y lo enciende. Devuelve config + aviso opcional. `import_dump()` acelera con pragmas de sesión, emite barra de progreso en vivo, y un watchdog cancela el `docker exec` si no hay avance en 3 min (mide stdin + tamaño real de DB) → `wordpress::reset_database` revierte y reintentar reanuda. |
@@ -173,7 +174,12 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `gh_register` | `id, path` | `SiteConfig` | Registra en config un git huérfano ya en disco (lee remoto/rama). No clona. |
 | `open_vscode` | `id` | `()` | Genera (una vez) `<nombre>.code-workspace` (public/ principal + repos git detectados) y lo abre en VSCode/VSCodium. |
 | `regenerate_ssl` | `id` | `()` | Regenera cert mkcert + reload nginx. |
-| `set_site_group` | `id, group?` | `SiteConfig` | Asigna/quita grupo del proyecto. |
+| `set_site_group` | `id, group?` | `SiteConfig` | Asigna/quita grupo del proyecto (target de drag&drop). Registra el grupo en `groups.json` si es nuevo. |
+| `list_groups` | — | `Vec<String>` | Grupos persistidos, en orden (`groups.json`). |
+| `create_group` | `name` | — | Crea un grupo vacío (idempotente). |
+| `rename_group` | `old, new` | — | Renombra el grupo y reasigna los proyectos que lo tenían. |
+| `delete_group` | `name` | — | Borra el grupo; sus proyectos quedan sin grupo. |
+| `reorder_groups` | `order` | — | Sobrescribe el orden de los grupos. |
 | `set_site_minio` | `id, enabled` | `SiteConfig` | Activa/desactiva MinIO; arranca el servicio si el proyecto corre. |
 | `export_db` | `id` | `String` (ruta) | Dump de la DB a `app/sql/` (lo registra en el log de volcados, source `manual`). |
 | `dump_log` | — | `Vec<DumpLogEntry>` | Log de volcados de DB, más nuevos primero (para revisar/comparar). |
@@ -264,15 +270,33 @@ Origen import LocalWP (solo lectura): ~/.config/Local/sites.json + ~/Local Sites
 
 - SvelteKit + Svelte 5 (runes: `$state`, `$derived`, `$effect`, `$props`).
 - `adapter-static` modo SPA: `+layout.ts` con `ssr=false`, `prerender=false`,
-  fallback `index.html`. El routing (incl. `/site/[id]`) es 100% cliente.
+  fallback `index.html`. El routing es 100% cliente.
+- **Layout de 3 columnas** (estilo LocalWP): `+layout.svelte` es un **riel de
+  íconos** angosto (Proyectos `/`, Dominios, Servicios, Configuración + botón «+»
+  Nuevo proyecto), con la sección activa por `page.url.pathname`. La ruta `/`
+  (`+page.svelte`) es un **master-detail**: columna izquierda = lista de proyectos
+  agrupada (grupos de `groups.json` fusionados con `config.group`; alta de grupo
+  inline, **drag&drop** nativo HTML5 de la fila de proyecto sobre la cabecera de
+  grupo → `set_site_group`; power/estado como íconos; **grupos plegables** con
+  estado en `localStorage` y una sección fija **"En ejecución"** que sube los
+  proyectos `running` al inicio sin duplicarlos), y panel grande = el detalle
+  del proyecto **seleccionado por estado** (`selectedId`, sin navegar) vía
+  `{#key}<ProjectDetail/>`. Dominios/Servicios/Configuración siguen siendo páginas
+  sueltas con padding estándar.
 - `lib/api.ts` envuelve `invoke`. `lib/types.ts` = espejo de los modelos serde
   (incl. `Endpoint` + helper `siteUrl`).
-- Componentes (`lib/components/`): `OpConsole.svelte` — consola modal que escucha
+- Componentes (`lib/components/`): `ProjectDetail.svelte` — todo el detalle de un
+  proyecto (cabecera con acción primaria encender/detener + menú «···» de acciones
+  secundarias + accesos rápidos; tabs Info/Logs/Plugins-Themes/GitHub/Servicios/
+  Puntos de guardado; el selector de usuario de auto-login vive en el tab Info).
+  Recibe `id` por prop y notifica al master-detail vía `onChanged`/`onDeleted`/
+  `onSelect`. Lo monta `/` (embebido) y el wrapper `/site/[id]` (deep-link).
+  `OpConsole.svelte` — consola modal que escucha
   `op-log` y muestra los pasos en vivo (botón «Cerrar» bloqueado mientras corre;
   botón «Cancelar borrado» opcional). `DeleteProjectModal.svelte` — borrado de un
   proyecto: modal de confirmación (titulado con el nombre + checkbox para borrar
   también la carpeta) y, al confirmar, `OpConsole` con la ventana de gracia de 5 s
-  y `delete_site`. Se usa en el dashboard y en `/site/[id]` (`bind:site`).
+  y `delete_site`. Se usa en `ProjectDetail` (`bind:site`).
   `ImportProjectModal.svelte` — modal del dashboard (botón «Importar proyecto»)
   que lista las carpetas desconectadas (`list_disconnected_sites`) y re-importa
   la elegida (`import_disconnected_site`) mostrando el progreso en `OpConsole`.

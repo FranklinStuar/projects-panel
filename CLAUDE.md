@@ -50,12 +50,15 @@ PLAN.md                  plan de producto
 CLAUDE.md                este archivo
 docs/                    architecture, extending, changelog
 src/                     frontend SvelteKit (SPA, ssr=false)
-  routes/                páginas (dashboard, site/new, site/[id], domains, services, settings)
+  routes/                +layout (riel de íconos), / (master-detail proyectos),
+                         site/new, site/[id] (wrapper deep-link), domains, services, settings
+  lib/components/        ProjectDetail.svelte (detalle embebido), OpConsole, *Modal
   lib/api.ts             capa IPC (espejo de comandos Rust)
   lib/types.ts           tipos TS (espejo de modelos serde)
 src-tauri/src/           backend Rust
   lib.rs                 comandos #[tauri::command] + run()
   config.rs              modelos + persistencia (~/panel-wp/*/config.json)
+  groups.rs              lista durable de grupos (config_dir/groups.json)
   docker.rs              orquestación bollard (red, compartidos, ciclo de vida)
   nginx.rs / php.rs / domain.rs / wpcli.rs / wordpress.rs
   logs.rs / autologin.rs / github.rs / ssl.rs / dbus.rs
@@ -106,6 +109,13 @@ scripts/                 first-run.sh, wp-wrapper.sh, wordpress-panel-cli.sh
   `git worktree remove` (la rama queda) + borrar carpeta. Si tocas montajes o
   vhosts, respeta el branch `worktree_of` en `docker::create_php_container` y
   `nginx::render_vhost`.
+- **UI master-detail** (estilo LocalWP): `+layout.svelte` = riel de íconos por
+  sección; la ruta `/` es lista de proyectos (izq) + detalle embebido (`ProjectDetail.svelte`,
+  seleccionado por `selectedId`, sin navegar). El detalle de un proyecto se edita
+  en `ProjectDetail.svelte` (NO en `/site/[id]`, que es solo un wrapper de deep-link).
+- **Grupos**: lista durable en `groups.json` (`groups.rs`); la pertenencia sigue en
+  `config.group`. Se asigna por **drag&drop** (fila→cabecera de grupo, `set_site_group`),
+  NO con input dentro del proyecto. Grupos vacíos persisten con su orden.
 - **Naming de containers**: proyecto = `wp-{site-id}`; compartidos = `panel-*`.
 - **Estado de recursos**: al detener un proyecto, apagar también los compartidos
   que ya no use ningún activo (`teardown_unused_shared`). Nunca dejar algo
@@ -122,7 +132,9 @@ clics vía `docker/adminer/autologin.php` (comando `open_adminer`). Puntos de
 guardado + clones temporales (`snapshot.rs`, `clone.rs`) y **worktree-projects**
 (`worktree.rs`: probar una rama de un theme/plugin en aislamiento por montajes,
 sin duplicar WordPress; IPC + UI en Git/GitHub + `wordpress-panel-cli worktree`).
-Pendiente: Fase 5 (IA, `agent.rs`). Ver `docs/CHANGELOG.md` para
+**Rediseño UI** master-detail estilo LocalWP: riel de íconos, lista de proyectos
++ detalle embebido (`ProjectDetail.svelte`), grupos persistentes por drag&drop
+(`groups.rs`). Pendiente: Fase 5 (IA, `agent.rs`). Ver `docs/CHANGELOG.md` para
 el detalle. Diferido dentro de Fase 3:
 container de frontend headless y plugin S3 (WP↔MinIO). Limitaciones/temas
 diferidos en `docs/KNOWN_ISSUES.md`: botones de la barra de título, verificación

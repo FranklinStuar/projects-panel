@@ -20,5 +20,5 @@ test('crear un proyecto nuevo y verlo en el dashboard', async ({ page }) => {
 
   // El mock crea el sitio y la app navega al dashboard.
   await expect(page).toHaveURL('http://localhost:1420/');
-  await expect(page.getByRole('link', { name: 'Mi Nuevo Sitio' })).toBeVisible();
+  await expect(page.getByText('Mi Nuevo Sitio', { exact: true })).toBeVisible();
 });

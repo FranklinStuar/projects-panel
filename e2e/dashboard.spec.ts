@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
 
-// Dashboard de proyectos en modo mock. Ver docs/TESTING.md §C.
-test.describe('Dashboard', () => {
-  test('lista proyectos agrupados con estado y host', async ({ page }) => {
+// Master-detail de proyectos en modo mock. La lista izquierda muestra los grupos
+// y proyectos; al seleccionar uno, su detalle se abre en el panel grande. Ver
+// docs/TESTING.md §C.
+test.describe('Proyectos', () => {
+  test('lista proyectos agrupados; seleccionar abre el detalle con el host', async ({ page }) => {
     await page.goto('/');
 
     await expect(page.getByRole('heading', { name: 'Proyectos', level: 1 })).toBeVisible();
@@ -11,19 +13,21 @@ test.describe('Dashboard', () => {
     await expect(page.getByRole('heading', { name: 'Cliente A' })).toBeVisible();
     await expect(page.getByRole('heading', { name: 'LocalWP' })).toBeVisible();
 
-    // Proyectos.
-    await expect(page.getByRole('link', { name: 'Tienda Demo' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Blog Personal' })).toBeVisible();
+    // Proyectos en la lista.
+    await expect(page.getByText('Tienda Demo', { exact: true })).toBeVisible();
+    await expect(page.getByText('Blog Personal', { exact: true })).toBeVisible();
 
-    // El endpoint usa puerto alterno → la URL muestra :8443 en el sitio SSL.
+    // Al seleccionar un proyecto, el detalle muestra el host con puerto alterno
+    // (el endpoint del fixture publica en :8443 para SSL).
+    await page.getByText('Tienda Demo', { exact: true }).click();
     await expect(page.getByText('tienda-demo.test:8443')).toBeVisible();
   });
 
   test('encender un proyecto parado lo marca como corriendo', async ({ page }) => {
     await page.goto('/');
 
-    // Solo el proyecto parado muestra "Encender" (exact: evita casar con el
-    // botón "Migrar y encender" del proyecto pendiente).
+    // El botón power de la lista es un ícono con aria-label. Solo el proyecto
+    // parado (Blog Personal) muestra "Encender".
     const encender = page.getByRole('button', { name: 'Encender', exact: true });
     await expect(encender).toHaveCount(1);
     await encender.click();
