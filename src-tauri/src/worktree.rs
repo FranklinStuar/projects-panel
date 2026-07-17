@@ -66,6 +66,21 @@ async fn run_create<R: tauri::Runtime>(
     if branch.is_empty() {
         return Err(anyhow!("debes indicar el nombre de la rama del worktree"));
     }
+    // git rechaza ramas con espacios; suele ser un pegado accidental del comando
+    // entero («git checkout -b feature/x») en vez de solo «feature/x». Detectamos
+    // ese caso y sugerimos la rama ya extraída del pegado.
+    if let Some(bad) = invalid_branch_reason(branch) {
+        let hint = guess_branch(branch);
+        return Err(anyhow!(
+            "«{branch}» no es un nombre de rama válido ({bad}).\n\
+             Escribe SOLO el nombre de la rama (ej. «feature/mi-cambio»), sin «git checkout -b» ni comillas.\
+             {}",
+            match hint {
+                Some(g) => format!("\n¿Quisiste decir «{g}»?"),
+                None => String::new(),
+            }
+        ));
+    }
     let target_path = target_path.trim().trim_matches('/');
 
     // -- Padre + validación del repo objetivo ---------------------------------
@@ -146,6 +161,10 @@ async fn run_create<R: tauri::Runtime>(
         snapshot_excludes: vec![],
     };
 
+    // Pasos [1/7]..[7/7] en un bloque: si algo falla a medias, se limpia todo
+    // (container/vhost/carpeta) para no dejar proyectos huérfanos que luego
+    // rompan nginx (config.json ya escrito pero sin cert SSL, sin worktree, …).
+    let build = async {
     // -- 1. Carpeta + php.ini + config.json -----------------------------------
     log(app, "[1/7] Preparando carpeta del worktree…");
     crate::wordpress::create_dirs(&site)?;
@@ -238,6 +257,16 @@ async fn run_create<R: tauri::Runtime>(
     }
 
     log(app, format!("✓ Worktree listo → {domain}"));
+    Ok::<(), anyhow::Error>(())
+    };
+
+    if let Err(err) = build.await {
+        log(app, "  Limpiando el worktree a medio crear…".to_string());
+        docker.remove_container(&site.container_name()).await.ok();
+        crate::nginx::remove_vhost(&site).ok();
+        std::fs::remove_dir_all(&site.path).ok();
+        return Err(err);
+    }
     Ok(site)
 }
 
@@ -396,6 +425,34 @@ async fn git(repo: &Path, args: &[&str]) -> Result<GitOut> {
 // slug / slot (DNS-safe, sin colisión de path/dominio)
 // ---------------------------------------------------------------------------
 
+/// Motivo por el que `branch` no es un nombre de rama git válido, o `None` si lo
+/// es. Cubre los casos que rompen en la práctica (pegar el comando entero, dejar
+/// espacios/comillas). No reimplementa todas las reglas de `git check-ref-format`.
+fn invalid_branch_reason(branch: &str) -> Option<&'static str> {
+    if branch.contains(char::is_whitespace) {
+        Some("no puede contener espacios")
+    } else if branch.starts_with('-') {
+        Some("no puede empezar por «-»")
+    } else if branch.contains("..") {
+        Some("no puede contener «..»")
+    } else if branch.contains(['~', '^', ':', '?', '*', '[', '\\', '"', '\'']) {
+        Some("contiene caracteres no permitidos")
+    } else {
+        None
+    }
+}
+
+/// Intenta recuperar la rama de un pegado tipo «git checkout -b feature/x»: quita
+/// el comando y las comillas y devuelve el último token con pinta de rama.
+fn guess_branch(pasted: &str) -> Option<String> {
+    let cand = pasted
+        .split_whitespace()
+        .rev()
+        .map(|t| t.trim_matches(['"', '\'']))
+        .find(|t| !t.is_empty() && !t.starts_with('-'))?;
+    (invalid_branch_reason(cand).is_none() && cand != pasted).then(|| cand.to_string())
+}
+
 /// Slug DNS-safe: minúsculas, alfanumérico y guiones. Vacío → "wt".
 fn slugify(label: &str) -> String {
     let mut out = String::with_capacity(label.len());
@@ -440,6 +497,19 @@ fn find_free_slot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn valida_rama_y_sugiere() {
+        // El pegado del comando entero es inválido y se sugiere la rama real.
+        let pasted = "git checkout -b feature/franklinp/sc-8300/uws-new-page";
+        assert!(invalid_branch_reason(pasted).is_some());
+        assert_eq!(guess_branch(pasted).as_deref(), Some("feature/franklinp/sc-8300/uws-new-page"));
+        // Comillas alrededor → se limpian.
+        assert_eq!(guess_branch("\"feature/x\"").as_deref(), Some("feature/x"));
+        // Una rama válida no dispara error ni sugerencia (no hay nada que corregir).
+        assert!(invalid_branch_reason("feature/x").is_none());
+        assert_eq!(guess_branch("feature/x"), None);
+    }
 
     #[test]
     fn slugify_ramas() {
