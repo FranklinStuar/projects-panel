@@ -6,6 +6,8 @@
 
 use anyhow::{Context, Result};
 use serde::Serialize;
+use tauri::Manager as _;
+use tauri_plugin_opener::OpenerExt;
 use zbus::interface;
 
 use crate::config;
@@ -57,6 +59,8 @@ impl Manager {
         let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
             return false;
         };
+        // Parar el watcher de auto-dump antes del stop (igual que el comando Tauri).
+        self.app.state::<crate::autodump::AutoDump>().stop(&id);
         docker.stop_site(&site, &all).await.is_ok()
     }
 
@@ -74,6 +78,86 @@ impl Manager {
             }
         }
         ok
+    }
+
+    /// Enciende un proyecto y arranca su watcher de auto-dump. true si no hubo error.
+    async fn start_site(&self, id: String) -> bool {
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return false;
+        };
+        let docker = match DockerManager::connect() {
+            Ok(d) => d,
+            Err(_) => return false,
+        };
+        if docker.start_site(&site).await.is_err() {
+            return false;
+        }
+        self.app.state::<crate::autodump::AutoDump>().start(site);
+        true
+    }
+
+    /// Abre el admin del proyecto con auto-login. JSON `{ok:true}` o error.
+    async fn open_admin(&self, id: String) -> String {
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return err_json("proyecto no encontrado");
+        };
+        let docker = match DockerManager::connect() {
+            Ok(d) => d,
+            Err(e) => return err_json(&e.to_string()),
+        };
+        match crate::autologin::open_admin(&self.app, &docker, &site, None).await {
+            Ok(()) => serde_json::json!({ "ok": true }).to_string(),
+            Err(e) => err_json(&format!("{e:#}")),
+        }
+    }
+
+    /// Abre el frontend del proyecto en el navegador. JSON `{ok,url}` o error.
+    async fn open_site(&self, id: String) -> String {
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return err_json("proyecto no encontrado");
+        };
+        let docker = match DockerManager::connect() {
+            Ok(d) => d,
+            Err(e) => return err_json(&e.to_string()),
+        };
+        if !docker.is_running(&site.container_name()).await {
+            return err_json("el proyecto no está encendido");
+        }
+        let url = config::endpoint_or_default().site_url(&site.domain, site.services.nginx.ssl);
+        match self.app.opener().open_url(url.clone(), None::<&str>) {
+            Ok(()) => serde_json::json!({ "ok": true, "url": url }).to_string(),
+            Err(e) => err_json(&format!("{e:#}")),
+        }
+    }
+
+    /// Contenedores del proyecto y su estado. JSON `[{name,role,running}, ...]`.
+    async fn project_containers(&self, id: String) -> String {
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return err_json("proyecto no encontrado");
+        };
+        let docker = match DockerManager::connect() {
+            Ok(d) => d,
+            Err(e) => return err_json(&e.to_string()),
+        };
+        let mut entries = vec![
+            (site.container_name(), "php"),
+            (crate::docker::db_container_name(&site.services.db), "db"),
+            (crate::docker::NGINX.to_string(), "nginx"),
+            (crate::docker::MAILPIT.to_string(), "mailpit"),
+        ];
+        if site.minio {
+            entries.push((crate::docker::MINIO.to_string(), "minio"));
+        }
+        let mut arr = Vec::with_capacity(entries.len());
+        for (name, role) in entries {
+            let running = docker.is_running(&name).await;
+            arr.push(serde_json::json!({ "name": name, "role": role, "running": running }));
+        }
+        serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
     }
 
     /// Cierra el panel.

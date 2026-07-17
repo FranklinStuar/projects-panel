@@ -246,6 +246,15 @@ interfaz `…Manager`:
 | `GhBuildDirs(id, path)` | `String` (JSON) | Carpetas candidatas de build. |
 | `GhSetDeploy(id, path, branch, buildCmd, buildDirsCsv)` | `bool` | Guarda config de deploy directo. |
 | `GhDeploy(id, path)` | `String` (JSON `{ok}`) | Deploy directo: checkout + pull --ff-only + build. |
+| `StartSite(id)` | `bool` | Enciende un proyecto y arranca el watcher de auto-dump. |
+| `OpenAdmin(id)` | `String` (JSON `{ok}`) | Abre wp-admin con auto-login (reusa `autologin`). |
+| `OpenSite(id)` | `String` (JSON `{ok,url}`) | Abre el frontend del proyecto en el navegador. |
+| `ProjectContainers(id)` | `String` (JSON `[{name,role,running}]`) | Contenedores del proyecto (php + compartidos: db/nginx/mailpit/minio). |
+
+(`StopSite` además para el watcher de auto-dump.) La CLI añade `start`, `stop`,
+`open {admin,site,folder}`, `containers`, `resources` (docker stats) y `logs`
+(docker logs; `open folder`/`logs`/`resources` se resuelven en el host sin panel
+salvo la parte que necesita nombres de contenedores compartidos).
 
 Todos los métodos de snapshot/clone/git los consume `wordpress-panel-cli`
 (`snapshot {list,create,delete,clone}`, `git {scan,status,pull,set-deploy,deploy}`);

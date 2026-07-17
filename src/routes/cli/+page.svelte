@@ -21,6 +21,26 @@
   // Grupos de comandos. `cmd` se muestra en monoespaciada; `desc` lo explica.
   const groups: { title: string; note?: string; items: { cmd: string; desc: string }[] }[] = [
     {
+      title: 'Control del proyecto',
+      note: 'Autodetecta el proyecto por el directorio actual.',
+      items: [
+        { cmd: 'wordpress-panel-cli start', desc: 'Enciende el proyecto (containers + nginx + auto-dump).' },
+        { cmd: 'wordpress-panel-cli stop', desc: 'Apaga el proyecto y los compartidos que ya nadie use.' },
+        { cmd: 'wordpress-panel-cli open admin', desc: 'Abre el wp-admin en el navegador con auto-login.' },
+        { cmd: 'wordpress-panel-cli open site', desc: 'Abre la web pública (frontend) del proyecto.' },
+        { cmd: 'wordpress-panel-cli open folder', desc: 'Abre la carpeta del proyecto en el explorador.' }
+      ]
+    },
+    {
+      title: 'Inspección',
+      note: 'containers/resources requieren el panel abierto; logs de php funciona aun sin él.',
+      items: [
+        { cmd: 'wordpress-panel-cli containers', desc: 'Lista los contenedores del proyecto (php, db, nginx, mailpit, minio) con su estado.' },
+        { cmd: 'wordpress-panel-cli resources', desc: 'docker stats (CPU/memoria) de los contenedores del proyecto.' },
+        { cmd: 'wordpress-panel-cli logs [servicio] [-f] [-n N]', desc: 'Logs de un contenedor (servicio: php por defecto, o db/nginx/mailpit/minio). -f sigue en vivo, -n limita líneas.' }
+      ]
+    },
+    {
       title: 'Puntos de guardado',
       note: 'Autodetecta el proyecto por el directorio actual.',
       items: [

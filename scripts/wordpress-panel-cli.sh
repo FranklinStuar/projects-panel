@@ -126,6 +126,20 @@ worktree   (autodetecta el proyecto del directorio actual)
   worktree create <rama> [--target <ruta>] [--base <rama>] [--copy-db]
   worktree remove <id-worktree> [--delete-branch]
 
+start                               Enciende el proyecto (containers).
+stop                                Apaga el proyecto.
+
+open <qué>   qué ∈ admin|site|front|folder
+  open admin                        Abre el wp-admin (auto-login) en el navegador.
+  open site | open front            Abre el frontend en el navegador.
+  open folder                       Abre la carpeta del proyecto en el explorador.
+
+containers                          Lista los containers del proyecto (name/role/running).
+resources                           docker stats de los containers del proyecto.
+
+logs [servicio] [-f] [-n N]         Ver logs de un container (default php, 200 líneas).
+                                    servicio ∈ php|db|nginx|mailpit|minio o nombre crudo.
+
 EJEMPLOS:
   cd ~/panel-wp/mi-sitio/app/public/wp-content/themes/mi-theme
   wordpress-panel-cli snapshot create "antes del refactor"
@@ -134,6 +148,13 @@ EJEMPLOS:
   wordpress-panel-cli git set-deploy --branch main --build "npm ci && npm run build" --dirs dist
   wordpress-panel-cli git deploy
   wordpress-panel-cli worktree create feature/nav --copy-db
+  wordpress-panel-cli start
+  wordpress-panel-cli open admin
+  wordpress-panel-cli open folder
+  wordpress-panel-cli containers
+  wordpress-panel-cli resources
+  wordpress-panel-cli logs nginx -f
+  wordpress-panel-cli logs php -n 500
 EOF
 }
 
@@ -307,6 +328,114 @@ worktree)
         exit 2
         ;;
     esac
+    ;;
+
+start)
+    require_panel
+    info="$(project_or_die)"; pid="${info%%|*}"
+    if [ "$(dbus_call StartSite "$pid" | tr -d ' ()')" = "true" ]; then
+        echo "✓ Encendido"
+    else
+        echo "✗ falló" >&2; exit 1
+    fi
+    ;;
+
+stop)
+    require_panel
+    info="$(project_or_die)"; pid="${info%%|*}"
+    if [ "$(dbus_call StopSite "$pid" | tr -d ' ()')" = "true" ]; then
+        echo "✓ Apagado"
+    else
+        echo "✗ falló" >&2; exit 1
+    fi
+    ;;
+
+open)
+    WHAT="${2:-}"
+    info="$(project_or_die)"; pid="${info%%|*}"; ppath="${info#*|}"
+    case "$WHAT" in
+    admin)
+        require_panel
+        res="$(dbus_json OpenAdmin "$pid")"
+        if [ "$(printf '%s' "$res" | jq -r '.ok')" = "true" ]; then
+            echo "ok: wp-admin abierto"
+        else
+            echo "fallo: $(printf '%s' "$res" | jq -r '.error // "error desconocido"')" >&2; exit 1
+        fi
+        ;;
+    site|front)
+        require_panel
+        res="$(dbus_json OpenSite "$pid")"
+        if [ "$(printf '%s' "$res" | jq -r '.ok')" = "true" ]; then
+            echo "ok: abierto $(printf '%s' "$res" | jq -r '.url // ""')"
+        else
+            echo "fallo: $(printf '%s' "$res" | jq -r '.error // "error desconocido"')" >&2; exit 1
+        fi
+        ;;
+    folder)
+        xdg-open "$ppath" >/dev/null 2>&1 &
+        echo "ok: abierto $ppath"
+        ;;
+    *)
+        echo "uso: wordpress-panel-cli open {admin|site|front|folder}" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+
+containers)
+    require_panel
+    info="$(project_or_die)"; pid="${info%%|*}"
+    dbus_json ProjectContainers "$pid" | jq -r '
+        (["NAME","ROLE","RUNNING"] | @tsv),
+        (.[] | [ .name, .role, (if .running then "sí" else "no" end) ] | @tsv)
+    ' | column -t -s $'\t'
+    ;;
+
+resources)
+    require_panel
+    info="$(project_or_die)"; pid="${info%%|*}"
+    names="$(dbus_json ProjectContainers "$pid" | jq -r '.[].name')"
+    existing=()
+    for n in $names; do
+        docker inspect "$n" >/dev/null 2>&1 && existing+=("$n")
+    done
+    if [ "${#existing[@]}" -eq 0 ]; then
+        echo "no hay containers del proyecto corriendo" >&2; exit 1
+    fi
+    docker stats --no-stream "${existing[@]}"
+    ;;
+
+logs)
+    info="$(project_or_die)"; pid="${info%%|*}"
+    shift || true   # descarta "logs"
+    SERVICE=""; FOLLOW=""; TAIL="200"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -f|--follow) FOLLOW="-f"; shift ;;
+            -n|--tail) TAIL="$2"; shift 2 ;;
+            *)
+                if [ -z "$SERVICE" ]; then SERVICE="$1"; shift
+                else echo "opción desconocida: $1" >&2; exit 2; fi
+                ;;
+        esac
+    done
+    [ -n "$SERVICE" ] || SERVICE="php"
+    case "$SERVICE" in
+    php)
+        CONTAINER="wp-$pid"
+        ;;
+    db|nginx|mailpit|minio)
+        require_panel
+        CONTAINER="$(dbus_json ProjectContainers "$pid" | jq -r --arg r "$SERVICE" '.[] | select(.role==$r) | .name' | head -1)"
+        [ -n "$CONTAINER" ] || { echo "error: no hay container con rol '$SERVICE' en este proyecto" >&2; exit 1; }
+        ;;
+    *)
+        CONTAINER="$SERVICE"   # nombre de container literal
+        ;;
+    esac
+    docker inspect "$CONTAINER" >/dev/null 2>&1 || { echo "error: el container '$CONTAINER' no existe" >&2; exit 1; }
+    docker logs --tail "$TAIL" $FOLLOW "$CONTAINER" || true
     ;;
 
 *)
