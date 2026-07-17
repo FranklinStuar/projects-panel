@@ -27,8 +27,10 @@ tokio = { version = "1", features = ["full"] }
 bollard = "0.18"
 futures-util = "0.3"
 
-# D-Bus (interfaz para el plasmoid KDE)
-zbus = "5"
+# D-Bus (interfaz para el plasmoid KDE). Feature `tokio`: el executor de zbus
+# corre sobre el runtime Tokio del panel, no el suyo propio (async-io); si no,
+# los handlers que tocan Docker (bollard) panican ("no reactor running").
+zbus = { version = "5", default-features = false, features = ["tokio"] }
 
 # Serde
 serde = { version = "1", features = ["derive"] }
