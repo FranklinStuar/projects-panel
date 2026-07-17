@@ -19,6 +19,18 @@ fn vhost_path(site: &SiteConfig) -> Result<PathBuf> {
     Ok(conf_d_dir()?.join(format!("{}.conf", site.id)))
 }
 
+/// Escribe (idempotente) un fragmento de tuning global en `conf.d`. Los archivos
+/// de `conf.d` se incluyen dentro del bloque `http` del nginx de serie, así que
+/// una directiva suelta aquí aplica a nivel http. Necesario porque los dominios
+/// largos (worktrees con slug largo, p. ej. `pgnyc-dev-feature-...test`) desbordan
+/// el `server_names_hash_bucket_size` por defecto (64) y nginx no arranca.
+pub fn ensure_tuning() -> Result<()> {
+    let path = conf_d_dir()?.join("00-panel-tuning.conf");
+    std::fs::write(&path, "server_names_hash_bucket_size 128;\n")
+        .with_context(|| format!("escribiendo tuning nginx {:?}", path))?;
+    Ok(())
+}
+
 /// Nombre de la carpeta del proyecto bajo `~/panel-wp/` (= basename de path).
 pub(crate) fn project_dirname(site: &SiteConfig) -> String {
     Path::new(&site.path)

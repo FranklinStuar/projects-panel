@@ -508,6 +508,7 @@ impl DockerManager {
         }
 
         let conf_d = nginx::conf_d_dir()?;
+        nginx::ensure_tuning()?; // dominios largos necesitan más hash bucket
         let projects = crate::config::projects_root()?;
 
         let mut ports = HashMap::new();
