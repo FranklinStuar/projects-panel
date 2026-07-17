@@ -172,6 +172,10 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `gh_remove` | `id, path` | `SiteConfig` | Borra carpeta + desregistra de `github.repos`. |
 | `gh_scan` | `id` | `Vec<DetectedRepo>` | Escanea `wp-content` (prof. 4, salta node_modules/vendor) y lista repos git registrados + huérfanos (remoto, rama, `registered`). |
 | `gh_register` | `id, path` | `SiteConfig` | Registra en config un git huérfano ya en disco (lee remoto/rama). No clona. |
+| `gh_branch_status` | `id, path, branch` | `BranchStatus` | `git fetch` + compara la rama con `origin/<branch>`: ahead/behind, árbol sucio, `canPull`. No muta el árbol. |
+| `gh_set_deploy` | `id, path, branch, buildCmd?, buildDirs` | `SiteConfig` | Guarda rama objetivo, comando de build (`GithubRepo.buildCmd`) y carpetas de build (`buildDirs`, rel. al repo) del deploy directo. Repo debe estar registrado. |
+| `gh_build_dirs` | `id, path` | `Vec<String>` | Carpetas candidatas de build en el repo: raíz (`""`) y subcarpetas de nivel 1 con `package.json`. Para el selector de la UI. |
+| `gh_deploy` | `id, path` | `()` | Deploy directo (staging): checkout + `git pull --ff-only` + build en host (login shell) en cada `buildDirs` (o raíz). Emite al op-log. |
 | `open_vscode` | `id` | `()` | Genera (una vez) `<nombre>.code-workspace` (public/ principal + repos git detectados) y lo abre en VSCode/VSCodium. |
 | `regenerate_ssl` | `id` | `()` | Regenera cert mkcert + reload nginx. |
 | `set_site_group` | `id, group?` | `SiteConfig` | Asigna/quita grupo del proyecto (target de drag&drop). Registra el grupo en `groups.json` si es nuevo. |

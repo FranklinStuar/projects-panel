@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { api } from '$lib/api';
-  import type { SiteState, SiteConfig, GhStatus, DetectedRepo, Endpoint, SnapshotMeta, ExcludableEntry, WpUser } from '$lib/types';
+  import type { SiteState, SiteConfig, GhStatus, DetectedRepo, BranchStatus, Endpoint, SnapshotMeta, ExcludableEntry, WpUser } from '$lib/types';
   import OpConsole from '$lib/components/OpConsole.svelte';
   import DeleteProjectModal from '$lib/components/DeleteProjectModal.svelte';
 
@@ -406,6 +406,75 @@
   let clonePath = $state(''); // ruta custom opcional (relativa a public/)
   // Repos git detectados en disco (registrados + huérfanos)
   let detected = $state<DetectedRepo[]>([]);
+  // Deploy directo (staging): panel expandible por repo
+  let deployOpen = $state<string | null>(null); // path del repo con el panel abierto
+  let deployBranch = $state('');
+  let deployCmd = $state('');
+  let deployDirs = $state<string[]>([]); // carpetas de build elegidas (relativas al repo)
+  let dirCandidates = $state<string[]>([]); // carpetas con package.json detectadas
+  let deployStatus = $state<BranchStatus | null>(null);
+  let deployConsoleOpen = $state(false);
+  let deployRunning = $state(false);
+
+  async function toggleDeploy(r: DetectedRepo) {
+    if (deployOpen === r.path) {
+      deployOpen = null;
+      return;
+    }
+    const reg = site?.config.github.repos.find((x) => x.path === r.path);
+    deployBranch = reg?.branch ?? r.branch ?? '';
+    deployCmd = reg?.buildCmd ?? '';
+    deployDirs = [...(reg?.buildDirs ?? [])];
+    deployStatus = null;
+    deployOpen = r.path;
+    dirCandidates = [];
+    try {
+      dirCandidates = await api.ghBuildDirs(id, r.path);
+    } catch (e) {
+      ghError = String(e);
+    }
+  }
+
+  function toggleDir(dir: string) {
+    deployDirs = deployDirs.includes(dir)
+      ? deployDirs.filter((d) => d !== dir)
+      : [...deployDirs, dir];
+  }
+
+  async function checkBranch(path: string) {
+    ghBusy = true;
+    ghError = null;
+    deployStatus = null;
+    try {
+      deployStatus = await api.ghBranchStatus(id, path, deployBranch.trim());
+    } catch (e) {
+      ghError = String(e);
+    } finally {
+      ghBusy = false;
+    }
+  }
+
+  async function runDeploy(path: string) {
+    // Persistir rama+build antes, para que el backend use lo que hay en pantalla.
+    try {
+      await api.ghSetDeploy(id, path, deployBranch.trim(), deployCmd.trim() || null, deployDirs);
+    } catch (e) {
+      ghError = String(e);
+      return;
+    }
+    deployConsoleOpen = true;
+    deployRunning = true;
+    ghError = null;
+    try {
+      await api.ghDeploy(id, path);
+      await load();
+      await scanRepos();
+    } catch (e) {
+      ghError = String(e);
+    } finally {
+      deployRunning = false;
+    }
+  }
 
   async function loadGh() {
     try {
@@ -774,24 +843,82 @@
     {:else}
       <div class="mb-5 flex flex-col gap-2">
         {#each detected as r (r.path)}
-          <div class="flex items-center justify-between gap-2 rounded border px-3 py-2 text-sm {r.registered ? 'border-zinc-200 dark:border-zinc-800' : 'border-amber-300 dark:border-amber-900/60'}">
-            <div class="min-w-0">
-              <div class="truncate font-medium">{r.remote ?? r.name}</div>
-              <div class="truncate text-xs text-zinc-500">{r.path}{r.branch ? ` · ${r.branch}` : ''}{r.remote ? '' : ' · sin remoto'}</div>
-            </div>
-            <div class="flex shrink-0 gap-2">
-              {#if r.registered}
-                {#if r.remote}
-                  <button class="rounded bg-zinc-200 px-2 py-1 text-xs dark:bg-zinc-800" disabled={ghBusy}
-                    onclick={() => ghAction(() => api.ghPull(id, r.path, r.branch ?? ''))}>Pull</button>
+          <div class="rounded border {r.registered ? 'border-zinc-200 dark:border-zinc-800' : 'border-amber-300 dark:border-amber-900/60'}">
+            <div class="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+              <div class="min-w-0">
+                <div class="truncate font-medium">{r.remote ?? r.name}</div>
+                <div class="truncate text-xs text-zinc-500">{r.path}{r.branch ? ` · ${r.branch}` : ''}{r.remote ? '' : ' · sin remoto'}</div>
+              </div>
+              <div class="flex shrink-0 gap-2">
+                {#if r.registered}
+                  {#if r.remote}
+                    <button class="rounded bg-emerald-600 px-2 py-1 text-xs font-medium text-white disabled:opacity-50" disabled={ghBusy || deployRunning}
+                      title="Ver estado y desplegar (pull + build) desde aquí"
+                      onclick={() => toggleDeploy(r)}>Deploy ▾</button>
+                    <button class="rounded bg-zinc-200 px-2 py-1 text-xs dark:bg-zinc-800" disabled={ghBusy}
+                      onclick={() => ghAction(() => api.ghPull(id, r.path, r.branch ?? ''))}>Pull</button>
+                  {/if}
+                  <button class="rounded px-2 py-1 text-xs text-red-500" disabled={ghBusy} title="Quitar del proyecto (borra la carpeta)"
+                    onclick={() => ghAction(() => api.ghRemove(id, r.path))}>✕</button>
+                {:else}
+                  <button class="rounded bg-amber-500 px-2 py-1 text-xs font-medium text-white disabled:opacity-50" disabled={ghBusy} title="Registrar en el proyecto"
+                    onclick={() => ghAction(() => api.ghRegister(id, r.path))}>Registrar</button>
                 {/if}
-                <button class="rounded px-2 py-1 text-xs text-red-500" disabled={ghBusy} title="Quitar del proyecto (borra la carpeta)"
-                  onclick={() => ghAction(() => api.ghRemove(id, r.path))}>✕</button>
-              {:else}
-                <button class="rounded bg-amber-500 px-2 py-1 text-xs font-medium text-white disabled:opacity-50" disabled={ghBusy} title="Registrar en el proyecto"
-                  onclick={() => ghAction(() => api.ghRegister(id, r.path))}>Registrar</button>
-              {/if}
+              </div>
             </div>
+
+            {#if r.registered && r.remote && deployOpen === r.path}
+              <div class="border-t border-zinc-200 px-3 py-3 text-sm dark:border-zinc-800">
+                <div class="mb-2 flex flex-wrap items-end gap-3">
+                  <label class="flex flex-col gap-1">
+                    <span class="text-xs text-zinc-500">Rama a desplegar</span>
+                    <input class="w-48 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700 dark:bg-zinc-900" placeholder="main" bind:value={deployBranch} />
+                  </label>
+                  <label class="flex flex-1 flex-col gap-1">
+                    <span class="text-xs text-zinc-500">Comando de build (host, tras el pull · opcional)</span>
+                    <input class="w-full rounded border border-zinc-300 px-2 py-1 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900" placeholder="pnpm install && pnpm build" bind:value={deployCmd} />
+                  </label>
+                </div>
+
+                <!-- Carpetas de build: dónde correr el comando (raíz por defecto) -->
+                {#if deployCmd.trim()}
+                  <div class="mb-2">
+                    <div class="mb-1 text-xs text-zinc-500">Carpeta(s) de build <span class="text-zinc-400">(sin marcar = raíz del repo · marca varias si el build va en más de una)</span></div>
+                    {#if dirCandidates.length === 0}
+                      <div class="text-xs text-zinc-400">No se detectaron carpetas con <code>package.json</code>. Se usará la raíz del repo.</div>
+                    {:else}
+                      <div class="flex flex-wrap gap-2">
+                        {#each dirCandidates as d (d)}
+                          <button
+                            class="rounded border px-2 py-1 text-xs {deployDirs.includes(d) ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-zinc-300 dark:border-zinc-700'}"
+                            onclick={() => toggleDir(d)}>{d === '' ? 'raíz' : d}</button>
+                        {/each}
+                      </div>
+                    {/if}
+                    {#if deployDirs.length}
+                      <div class="mt-1 text-xs text-zinc-500">Build en: {deployDirs.map((d) => (d === '' ? 'raíz' : d)).join(', ')}</div>
+                    {/if}
+                  </div>
+                {/if}
+
+                <div class="flex flex-wrap gap-2">
+                  <button class="rounded bg-zinc-200 px-3 py-1 text-xs dark:bg-zinc-800 disabled:opacity-50" disabled={ghBusy || deployRunning}
+                    onclick={() => checkBranch(r.path)}>Ver estado</button>
+                  <button class="rounded bg-emerald-600 px-3 py-1 text-xs font-medium text-white disabled:opacity-50" disabled={ghBusy || deployRunning}
+                    title="Guarda la config, hace checkout + git pull --ff-only y ejecuta el build"
+                    onclick={() => runDeploy(r.path)}>Pull + build</button>
+                  <button class="rounded px-3 py-1 text-xs text-blue-500 underline disabled:opacity-50" disabled={ghBusy || deployRunning}
+                    onclick={() => ghAction(() => api.ghSetDeploy(id, r.path, deployBranch.trim(), deployCmd.trim() || null, deployDirs))}>Solo guardar config</button>
+                </div>
+                {#if deployStatus}
+                  <div class="mt-3 rounded px-3 py-2 text-xs {deployStatus.canPull ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' : deployStatus.dirty || !deployStatus.hasRemote ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-300'}">
+                    <div>Rama actual: <code>{deployStatus.current}</code> · objetivo: <code>{deployStatus.target}</code></div>
+                    <div>↓ {deployStatus.behind} por traer · ↑ {deployStatus.ahead} por delante · {deployStatus.dirty ? 'árbol con cambios' : 'árbol limpio'}</div>
+                    <div class="mt-1 font-medium">{deployStatus.message}</div>
+                  </div>
+                {/if}
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -1199,5 +1326,6 @@
 <OpConsole open={snapshotConsoleOpen} running={snapshotRunning} title="Punto de guardado" onClose={() => (snapshotConsoleOpen = false)} />
 <OpConsole open={cloneConsoleOpen} running={cloning} title="Crear clone" onClose={() => (cloneConsoleOpen = false)} />
 <OpConsole open={wtConsoleOpen} running={wtRunning} title="Worktree" onClose={() => (wtConsoleOpen = false)} />
+<OpConsole open={deployConsoleOpen} running={deployRunning} title="Deploy" onClose={() => (deployConsoleOpen = false)} />
 
 <DeleteProjectModal bind:site={deleteTarget} onClose={(deleted) => deleted && onDeleted?.()} />

@@ -6,6 +6,7 @@ import type {
   NewSiteRequest,
   GhStatus,
   DetectedRepo,
+  BranchStatus,
   Endpoint,
   SystemStatus,
   Migration,
@@ -66,6 +67,13 @@ export const api = {
   ghRemove: (id: string, path: string) =>
     invoke<SiteConfig>('gh_remove', { id, path }),
   ghScan: (id: string) => invoke<DetectedRepo[]>('gh_scan', { id }),
+  // Deploy directo (staging): estado de rama, config de rama+build, y pull+build.
+  ghBranchStatus: (id: string, path: string, branch: string) =>
+    invoke<BranchStatus>('gh_branch_status', { id, path, branch }),
+  ghSetDeploy: (id: string, path: string, branch: string, buildCmd: string | null, buildDirs: string[]) =>
+    invoke<SiteConfig>('gh_set_deploy', { id, path, branch, buildCmd, buildDirs }),
+  ghBuildDirs: (id: string, path: string) => invoke<string[]>('gh_build_dirs', { id, path }),
+  ghDeploy: (id: string, path: string) => invoke<void>('gh_deploy', { id, path }),
   ghRegister: (id: string, path: string) =>
     invoke<SiteConfig>('gh_register', { id, path }),
   openVscode: (id: string) => invoke<void>('open_vscode', { id }),

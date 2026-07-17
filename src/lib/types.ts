@@ -26,6 +26,22 @@ export interface GithubRepo {
   repo: string;
   branch: string;
   path: string;
+  /** Comando de build a ejecutar en el host tras un deploy/pull (vacío = ninguno). */
+  buildCmd?: string | null;
+  /** Carpetas (relativas al repo) donde correr el build. Vacío = raíz. */
+  buildDirs?: string[];
+}
+
+/** Espejo de `github::BranchStatus`: estado de una rama frente a su remoto. */
+export interface BranchStatus {
+  current: string;
+  target: string;
+  hasRemote: boolean;
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+  canPull: boolean;
+  message: string;
 }
 
 export interface GithubConfig {

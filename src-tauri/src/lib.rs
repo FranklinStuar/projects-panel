@@ -825,6 +825,8 @@ async fn gh_clone(
         repo,
         branch,
         path: rel_path,
+        build_cmd: None,
+        build_dirs: vec![],
     });
     config::write_site_config(&site).map_err(e)?;
     Ok(site)
@@ -877,9 +879,70 @@ async fn gh_register(id: String, path: String) -> CmdResult<SiteConfig> {
         return Ok(site); // ya registrado
     }
     let (repo, branch) = github::read_repo_meta(&site, &path).await.map_err(e)?;
-    site.github.repos.push(config::GithubRepo { repo, branch, path });
+    site.github.repos.push(config::GithubRepo { repo, branch, path, build_cmd: None, build_dirs: vec![] });
     config::write_site_config(&site).map_err(e)?;
     Ok(site)
+}
+
+/// Estado de una rama frente a su remoto (fetch + ahead/behind + árbol sucio),
+/// para decidir si se puede hacer deploy directo.
+#[tauri::command]
+async fn gh_branch_status(id: String, path: String, branch: String) -> CmdResult<github::BranchStatus> {
+    let site = load_site(&id)?;
+    github::branch_status(&site, &path, &branch).await.map_err(e)
+}
+
+/// Guarda la rama objetivo, el comando de build y las carpetas de build de un
+/// repo registrado (config del deploy directo). El repo debe estar registrado.
+#[tauri::command]
+async fn gh_set_deploy(
+    id: String,
+    path: String,
+    branch: String,
+    build_cmd: Option<String>,
+    build_dirs: Vec<String>,
+) -> CmdResult<SiteConfig> {
+    let mut site = load_site(&id)?;
+    let repo = site
+        .github
+        .repos
+        .iter_mut()
+        .find(|r| r.path == path)
+        .ok_or_else(|| "el repo no está registrado; regístralo primero".to_string())?;
+    if !branch.trim().is_empty() {
+        repo.branch = branch.trim().to_string();
+    }
+    repo.build_cmd = build_cmd.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
+    repo.build_dirs = build_dirs
+        .into_iter()
+        .map(|d| d.trim().trim_matches('/').to_string())
+        .collect();
+    config::write_site_config(&site).map_err(e)?;
+    Ok(site)
+}
+
+/// Carpetas candidatas para el build dentro de un repo (raíz + subcarpetas con
+/// package.json), para el selector de la UI.
+#[tauri::command]
+async fn gh_build_dirs(id: String, path: String) -> CmdResult<Vec<String>> {
+    let site = load_site(&id)?;
+    Ok(github::build_dir_candidates(&site, &path))
+}
+
+/// Deploy directo de un repo registrado: checkout + `git pull --ff-only` + build
+/// (si hay comando configurado) en cada carpeta de build. Emite progreso al op-log.
+#[tauri::command]
+async fn gh_deploy(app: AppHandle, id: String, path: String) -> CmdResult<()> {
+    let site = load_site(&id)?;
+    let repo = site
+        .github
+        .repos
+        .iter()
+        .find(|r| r.path == path)
+        .ok_or_else(|| "el repo no está registrado".to_string())?;
+    github::deploy(&app, &site, &path, &repo.branch, repo.build_cmd.as_deref(), &repo.build_dirs)
+        .await
+        .map_err(e)
 }
 
 /// Abre el proyecto en VSCode. Genera (si no existe) un `.code-workspace` con
@@ -981,6 +1044,10 @@ pub fn run() {
             gh_remove,
             gh_scan,
             gh_register,
+            gh_branch_status,
+            gh_set_deploy,
+            gh_build_dirs,
+            gh_deploy,
             open_vscode,
             regenerate_ssl,
             set_site_group,

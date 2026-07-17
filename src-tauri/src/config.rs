@@ -112,10 +112,21 @@ pub struct WorktreeInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GithubRepo {
     pub repo: String,
     pub branch: String,
     pub path: String,
+    /// Comando de build a ejecutar en el host (login shell) tras un pull/deploy,
+    /// en la carpeta del repo. `None`/vacío = no ejecutar nada. Se usa para el
+    /// deploy directo desde el panel (staging sin servidor dedicado).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_cmd: Option<String>,
+    /// Carpetas (relativas al repo) donde correr `build_cmd`. Vacío = raíz del
+    /// repo. Permite proyectos cuyo build vive en `/src`, `/src-redesign`, o en
+    /// varias a la vez (se ejecuta el comando en cada una).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub build_dirs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -615,11 +626,15 @@ mod tests {
                 repo: "me/theme".into(),
                 branch: "main".into(),
                 path: "wp-content/themes/t".into(),
+                build_cmd: None,
+                build_dirs: vec![],
             }),
             plugins: vec![GithubRepo {
                 repo: "me/plug".into(),
                 branch: "dev".into(),
                 path: "wp-content/plugins/p".into(),
+                build_cmd: None,
+                build_dirs: vec![],
             }],
         };
         gh.normalize();

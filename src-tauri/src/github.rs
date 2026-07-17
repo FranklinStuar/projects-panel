@@ -146,6 +146,224 @@ pub async fn pull(site: &SiteConfig, rel_path: &str, branch: &str) -> Result<Str
     Ok(combined)
 }
 
+/// Estado de una rama de un repo frente a su remoto, para decidir si se puede
+/// hacer pull directo (deploy) sin abrir el editor.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchStatus {
+    /// Rama local actualmente en checkout.
+    pub current: String,
+    /// Rama objetivo consultada (la que se desplegará).
+    pub target: String,
+    /// ¿Existe `origin/<target>`? (si no, no se pudo comparar / hacer fetch).
+    pub has_remote: bool,
+    /// Commits locales que el remoto no tiene.
+    pub ahead: u32,
+    /// Commits del remoto que faltan en local (lo que traería el pull).
+    pub behind: u32,
+    /// Hay cambios sin commitear en el árbol de trabajo.
+    pub dirty: bool,
+    /// Se puede hacer pull limpio: hay algo que traer, sin cambios locales.
+    pub can_pull: bool,
+    /// Resumen legible para la UI.
+    pub message: String,
+}
+
+async fn git_out(dir: &std::path::Path, args: &[&str]) -> Result<(bool, String)> {
+    let dir_s = dir.to_string_lossy();
+    let mut full = vec!["-C", &*dir_s];
+    full.extend_from_slice(args);
+    let out = Command::new("git")
+        .args(&full)
+        .output()
+        .await
+        .with_context(|| format!("ejecutando git {}", args.join(" ")))?;
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    Ok((out.status.success(), combined))
+}
+
+/// Hace `git fetch` y compara la rama objetivo con `origin/<target>`. No modifica
+/// el árbol de trabajo. `target` vacío → la rama actual del repo.
+pub async fn branch_status(site: &SiteConfig, rel_path: &str, target: &str) -> Result<BranchStatus> {
+    let dir = dest_abs(site, rel_path);
+    if !dir.join(".git").exists() {
+        return Err(anyhow!("{rel_path} no es un repo git"));
+    }
+    let current = git_branch(&dir).await.unwrap_or_else(|| "HEAD".to_string());
+    let target = if target.trim().is_empty() { current.clone() } else { target.trim().to_string() };
+
+    // Fetch best-effort (usa las credenciales/SSH ya configuradas en el host).
+    let (fetched, fetch_out) = git_out(&dir, &["fetch", "--quiet", "origin"]).await?;
+
+    let dirty = {
+        let (_, s) = git_out(&dir, &["status", "--porcelain"]).await?;
+        !s.trim().is_empty()
+    };
+
+    let remote_ref = format!("origin/{target}");
+    // ahead\tbehind: left = commits en HEAD no en remoto, right = al revés.
+    let (ok, counts) = git_out(
+        &dir,
+        &["rev-list", "--left-right", "--count", &format!("HEAD...{remote_ref}")],
+    )
+    .await?;
+    let has_remote = ok;
+    let (ahead, behind) = if ok {
+        let mut it = counts.split_whitespace();
+        (
+            it.next().and_then(|s| s.parse().ok()).unwrap_or(0),
+            it.next().and_then(|s| s.parse().ok()).unwrap_or(0),
+        )
+    } else {
+        (0, 0)
+    };
+
+    let (can_pull, message) = summarize(has_remote, ahead, behind, dirty, &remote_ref, fetch_out.trim());
+    let _ = fetched;
+    Ok(BranchStatus { current, target, has_remote, ahead, behind, dirty, can_pull, message })
+}
+
+/// Decide si se puede hacer pull limpio y arma el resumen legible. Pura para poder
+/// testearla sin un repo git real.
+fn summarize(has_remote: bool, ahead: u32, behind: u32, dirty: bool, remote_ref: &str, fetch_err: &str) -> (bool, String) {
+    let can_pull = has_remote && behind > 0 && !dirty;
+    let message = if !has_remote {
+        format!("No existe {remote_ref} o falló el fetch: {fetch_err}")
+    } else if dirty {
+        "Hay cambios locales sin commitear: haz pull desde el editor para resolverlos.".to_string()
+    } else if behind == 0 {
+        "Al día con el remoto — no hay nada que traer.".to_string()
+    } else {
+        let extra = if ahead > 0 {
+            format!(" (ojo: {ahead} commit(s) local(es) por delante, el pull hará merge)")
+        } else {
+            String::new()
+        };
+        format!("{behind} commit(s) por traer, puedes hacer pull{extra}.")
+    };
+    (can_pull, message)
+}
+
+/// Deploy directo: checkout de la rama objetivo, `git pull --ff-only` y, si hay
+/// comando de build configurado, lo ejecuta en el host (login shell) en la
+/// carpeta del repo. Emite progreso al op-log. Cualquier fallo (rama sucia, pull
+/// no fast-forward, build con error) se reporta para que el usuario abra el editor.
+pub async fn deploy<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    site: &SiteConfig,
+    rel_path: &str,
+    branch: &str,
+    build_cmd: Option<&str>,
+    build_dirs: &[String],
+) -> Result<()> {
+    use crate::progress::log;
+    let dir = dest_abs(site, rel_path);
+    if !dir.join(".git").exists() {
+        return Err(anyhow!("{rel_path} no es un repo git"));
+    }
+    let branch = branch.trim();
+    log(app, format!("▶ Deploy de {rel_path}{}…", if branch.is_empty() { String::new() } else { format!(" (rama {branch})") }));
+
+    if !branch.is_empty() {
+        log(app, format!("Cambiando a la rama {branch}…"));
+        let (ok, out) = git_out(&dir, &["checkout", branch]).await?;
+        if !ok {
+            return Err(anyhow!("no se pudo hacer checkout de «{branch}» (¿cambios sin commitear?):\n{}", out.trim()));
+        }
+    }
+
+    log(app, "git pull --ff-only…".to_string());
+    let mut pull_args = vec!["pull", "--ff-only"];
+    if !branch.is_empty() {
+        pull_args.push("origin");
+        pull_args.push(branch);
+    }
+    let (ok, out) = git_out(&dir, &pull_args).await?;
+    log(app, out.trim().to_string());
+    if !ok {
+        return Err(anyhow!(
+            "git pull --ff-only falló (la rama diverge del remoto): resuélvelo desde el editor.\n{}",
+            out.trim()
+        ));
+    }
+
+    if let Some(cmd) = build_cmd.map(str::trim).filter(|c| !c.is_empty()) {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
+        // Carpetas donde correr el build: las configuradas o la raíz del repo.
+        // Un proyecto puede buildear en /src, /src-redesign, o en ambas.
+        let subs: Vec<String> = if build_dirs.is_empty() {
+            vec![String::new()]
+        } else {
+            build_dirs.iter().map(|s| s.trim().trim_matches('/').to_string()).collect()
+        };
+        for sub in &subs {
+            let wd = if sub.is_empty() { dir.clone() } else { dir.join(sub) };
+            if !wd.is_dir() {
+                return Err(anyhow!("la carpeta de build «{sub}» no existe en el repo"));
+            }
+            let label = if sub.is_empty() { "raíz".to_string() } else { sub.clone() };
+            log(app, format!("Ejecutando build en {label}: {cmd}"));
+            // `-lc`: login shell para cargar el perfil (nvm/node/pnpm) del usuario.
+            let out = Command::new(&shell)
+                .args(["-lc", cmd])
+                .current_dir(&wd)
+                .output()
+                .await
+                .context("ejecutando el comando de build")?;
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            for line in combined.lines() {
+                log(app, format!("  {line}"));
+            }
+            if !out.status.success() {
+                return Err(anyhow!(
+                    "el build falló en «{label}» (código {:?}); revisa la salida y abre el editor.",
+                    out.status.code()
+                ));
+            }
+            log(app, format!("✓ Build en {label} completado."));
+        }
+    }
+
+    log(app, format!("✓ Deploy de {rel_path} listo."));
+    Ok(())
+}
+
+/// Carpetas candidatas para el build dentro de un repo: la raíz (`""`) y/o
+/// subcarpetas de primer nivel que contengan `package.json`. Sirve para que la
+/// UI ofrezca elegirlas con un clic en vez de teclear la ruta.
+pub fn build_dir_candidates(site: &SiteConfig, rel_path: &str) -> Vec<String> {
+    let dir = dest_abs(site, rel_path);
+    let mut out = Vec::new();
+    if dir.join("package.json").exists() {
+        out.push(String::new()); // raíz del repo
+    }
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if !p.is_dir() {
+                continue;
+            }
+            let name = e.file_name().to_string_lossy().to_string();
+            if matches!(name.as_str(), "node_modules" | ".git" | "vendor") {
+                continue;
+            }
+            if p.join("package.json").exists() {
+                out.push(name);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 /// Borra una carpeta clonada del proyecto (en el host).
 pub fn remove_dir(site: &SiteConfig, rel_path: &str) -> Result<()> {
     let dir = dest_abs(site, rel_path);
@@ -347,4 +565,30 @@ pub async fn ensure_workspace(site: &SiteConfig) -> Result<std::path::PathBuf> {
     std::fs::write(&ws, serde_json::to_string_pretty(&doc)?)
         .with_context(|| format!("escribiendo {:?}", ws))?;
     Ok(ws)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summarize;
+
+    #[test]
+    fn summarize_estados() {
+        // Sin remoto → no se puede, mensaje de fetch.
+        let (ok, _) = summarize(false, 0, 0, false, "origin/main", "boom");
+        assert!(!ok);
+        // Árbol sucio → no se puede aunque haya commits por traer.
+        let (ok, _) = summarize(true, 0, 3, true, "origin/main", "");
+        assert!(!ok);
+        // Al día → no se puede (nada que traer).
+        let (ok, msg) = summarize(true, 0, 0, false, "origin/main", "");
+        assert!(!ok);
+        assert!(msg.contains("Al día"));
+        // Hay por traer y limpio → se puede.
+        let (ok, _) = summarize(true, 0, 2, false, "origin/main", "");
+        assert!(ok);
+        // Por delante también → se puede, pero avisa de merge.
+        let (ok, msg) = summarize(true, 1, 2, false, "origin/main", "");
+        assert!(ok);
+        assert!(msg.contains("merge"));
+    }
 }
