@@ -148,14 +148,29 @@ async fn run<R: Runtime>(
     tar_args.push("-C".into());
     tar_args.push(public.to_str().context("ruta public inválida")?.to_string());
     tar_args.push(".".into());
-    let status = Command::new("tar")
+    let out = Command::new("tar")
         .args(&tar_args)
-        .status()
+        .output()
         .await
         .context("ejecutando tar para el snapshot de código")?;
-    if !status.success() {
+    // tar: 0 = ok, 1 = avisos no fatales (típico «file changed as we read it» en
+    // un WP activo: cache/logs mutan durante el tar; el archivo queda válido),
+    // 2+ = error real. Solo abortamos en 2+; el aviso se registra y se sigue.
+    let code = out.status.code().unwrap_or(-1);
+    if code != 0 && code != 1 {
+        let stderr = String::from_utf8_lossy(&out.stderr);
         std::fs::remove_dir_all(&dir).ok();
-        return Err(anyhow!("tar falló al crear el snapshot de código"));
+        return Err(anyhow!(
+            "tar falló (código {code}) al crear el snapshot de código:\n{}",
+            stderr.trim()
+        ));
+    }
+    if code == 1 {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        log(app, format!(
+            "      ⚠ tar avisó de archivos que cambiaron durante la copia (no fatal): {}",
+            stderr.trim().lines().next().unwrap_or("")
+        ));
     }
     let code_bytes = std::fs::metadata(&code_path).map(|m| m.len()).unwrap_or(0);
     log(app, format!("      ✓ Código comprimido ({}).", fmt_bytes(code_bytes)));
