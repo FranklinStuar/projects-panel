@@ -817,7 +817,11 @@
     <div class="mb-4 flex items-center justify-between gap-3 rounded border border-zinc-200 px-3 py-2 dark:border-zinc-800">
       <div class="min-w-0 text-sm">
         <div class="font-medium">Editar en VSCode</div>
-        <div class="text-xs text-zinc-500">Abre un workspace con <code>public/</code> como carpeta principal y cada repo git detectado como adicional. Se crea una vez; luego puedes editarlo a mano.</div>
+        {#if site.config.worktreeOf}
+          <div class="text-xs text-zinc-500">Abre el <code>git worktree</code> (<code>wt/{site.config.worktreeOf.targetPath.split('/').pop()}</code>, rama <code>{site.config.worktreeOf.branch}</code>). Los cambios se reflejan en vivo en el sitio.</div>
+        {:else}
+          <div class="text-xs text-zinc-500">Abre un workspace con <code>public/</code> como carpeta principal y cada repo git detectado como adicional. Se crea una vez; luego puedes editarlo a mano.</div>
+        {/if}
       </div>
       <button class="shrink-0 rounded bg-blue-600 px-3 py-1 text-sm font-medium text-white disabled:opacity-50" disabled={ghBusy}
         onclick={() => ghAction(() => api.openVscode(id))}>Abrir en VSCode</button>

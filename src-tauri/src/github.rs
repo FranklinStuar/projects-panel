@@ -544,6 +544,24 @@ pub async fn ensure_workspace(site: &SiteConfig) -> Result<std::path::PathBuf> {
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
         .collect();
     let ws = std::path::Path::new(&site.path).join(format!("{safe}.code-workspace"));
+
+    // Worktree-project: lo editable es el `git worktree` del repo objetivo
+    // (`wt/{basename}`, con la rama nueva). El `public` está vacío —el código del
+    // padre se monta en runtime—, así que el workspace apunta al worktree.
+    if let Some(wt) = &site.worktree_of {
+        if !ws.exists() {
+            let basename = crate::config::path_basename(&wt.target_path);
+            let folders = vec![serde_json::json!({
+                "name": format!("{basename} · {}", wt.branch),
+                "path": std::path::Path::new("wt").join(basename).to_string_lossy(),
+            })];
+            let doc = serde_json::json!({ "folders": folders, "settings": {} });
+            std::fs::write(&ws, serde_json::to_string_pretty(&doc)?)
+                .with_context(|| format!("escribiendo {:?}", ws))?;
+        }
+        return Ok(ws);
+    }
+
     if ws.exists() {
         return Ok(ws);
     }
