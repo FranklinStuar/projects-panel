@@ -668,6 +668,17 @@ recursos (sin dependencias nuevas: drag&drop nativo HTML5, íconos SVG inline).
   proyectos `running` (no se duplican: salen de su grupo mientras corren y vuelven
   al pararse), para no buscarlos entre todos.
 
+## CLI ampliada (snapshots + git + deploy)
+
+`wordpress-panel-cli` (habla con el panel en ejecución por D-Bus) ahora cubre,
+además de `worktree {list,create,remove}`:
+- `snapshot {list,create <label>,delete <id>,clone <id>}` — puntos de guardado y
+  clone temporal desde uno.
+- `git {scan,status,pull,set-deploy,deploy}` — estado de rama vs remoto, pull y
+  deploy directo por repo (staging).
+Autodetecta el proyecto y el repo desde el CWD; salida con `jq`. Nuevos métodos
+D-Bus en `dbus.rs` que reusan `snapshot.rs`/`clone.rs`/`github.rs`.
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).

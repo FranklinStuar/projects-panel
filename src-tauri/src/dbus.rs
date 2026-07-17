@@ -138,6 +138,150 @@ impl Manager {
             .await
             .is_ok()
     }
+
+    // -- Snapshots, clones y git (los usa `wordpress-panel-cli`) --------------
+
+    /// Crea un punto de guardado. JSON `{ok,snapshot}` o `{ok:false,error}`.
+    async fn create_snapshot(&self, id: String, label: String) -> String {
+        let docker = match DockerManager::connect() {
+            Ok(d) => d,
+            Err(e) => return err_json(&e.to_string()),
+        };
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return err_json("proyecto no encontrado");
+        };
+        match crate::snapshot::create_snapshot(&self.app, &docker, &site, &label).await {
+            Ok(meta) => serde_json::json!({ "ok": true, "snapshot": meta }).to_string(),
+            Err(e) => err_json(&format!("{e:#}")),
+        }
+    }
+
+    /// Lista los puntos de guardado de un proyecto como array JSON de SnapshotMeta.
+    async fn list_snapshots(&self, id: String) -> String {
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return "[]".to_string();
+        };
+        let snaps = crate::snapshot::list_snapshots(&site).unwrap_or_default();
+        serde_json::to_string(&snaps).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Elimina un punto de guardado. Devuelve true si no hubo error.
+    async fn delete_snapshot(&self, id: String, snapshot_id: String) -> bool {
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return false;
+        };
+        crate::snapshot::delete_snapshot(&site, &snapshot_id).is_ok()
+    }
+
+    /// Crea un clone temporal desde un snapshot. JSON `{ok,id,domain}` o error.
+    async fn create_clone(&self, parent_id: String, snapshot_id: String) -> String {
+        let docker = match DockerManager::connect() {
+            Ok(d) => d,
+            Err(e) => return err_json(&e.to_string()),
+        };
+        match crate::clone::create_clone(&self.app, &docker, &parent_id, &snapshot_id).await {
+            Ok(s) => serde_json::json!({ "ok": true, "id": s.id, "domain": s.domain }).to_string(),
+            Err(e) => err_json(&format!("{e:#}")),
+        }
+    }
+
+    /// Detecta los repos git del proyecto como array JSON de DetectedRepo.
+    async fn gh_scan(&self, id: String) -> String {
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return "[]".to_string();
+        };
+        let repos = crate::github::scan(&site).await;
+        serde_json::to_string(&repos).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// `git pull --ff-only` de un repo. JSON `{ok,output}` o `{ok:false,error}`.
+    async fn gh_pull(&self, id: String, path: String, branch: String) -> String {
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return err_json("proyecto no encontrado");
+        };
+        match crate::github::pull(&site, &path, &branch).await {
+            Ok(out) => serde_json::json!({ "ok": true, "output": out }).to_string(),
+            Err(e) => err_json(&format!("{e:#}")),
+        }
+    }
+
+    /// Estado de una rama frente a su remoto (BranchStatus serializado) o error.
+    async fn gh_branch_status(&self, id: String, path: String, branch: String) -> String {
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return err_json("proyecto no encontrado");
+        };
+        match crate::github::branch_status(&site, &path, &branch).await {
+            Ok(st) => serde_json::to_string(&st).unwrap_or_else(|_| err_json("no serializable")),
+            Err(e) => err_json(&format!("{e:#}")),
+        }
+    }
+
+    /// Carpetas candidatas para el build de un repo, como array JSON de String.
+    async fn gh_build_dirs(&self, id: String, path: String) -> String {
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return "[]".to_string();
+        };
+        let dirs = crate::github::build_dir_candidates(&site, &path);
+        serde_json::to_string(&dirs).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Guarda rama/comando/carpetas de build de un repo registrado. true si Ok.
+    async fn gh_set_deploy(
+        &self,
+        id: String,
+        path: String,
+        branch: String,
+        build_cmd: String,
+        build_dirs_csv: String,
+    ) -> bool {
+        let Ok(Some(mut site)) = config::find_site(&id) else {
+            return false;
+        };
+        let Some(repo) = site.github.repos.iter_mut().find(|r| r.path == path) else {
+            return false;
+        };
+        if !branch.trim().is_empty() {
+            repo.branch = branch.trim().to_string();
+        }
+        repo.build_cmd = (!build_cmd.trim().is_empty()).then(|| build_cmd.trim().to_string());
+        repo.build_dirs = build_dirs_csv
+            .split(',')
+            .map(|d| d.trim().trim_matches('/').to_string())
+            .filter(|d| !d.is_empty())
+            .collect();
+        config::write_site_config(&site).is_ok()
+    }
+
+    /// Deploy directo de un repo registrado. JSON `{ok:true}` o `{ok:false,error}`.
+    async fn gh_deploy(&self, id: String, path: String) -> String {
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return err_json("proyecto no encontrado");
+        };
+        let Some(repo) = site.github.repos.iter().find(|r| r.path == path) else {
+            return err_json("repo no registrado");
+        };
+        match crate::github::deploy(
+            &self.app,
+            &site,
+            &path,
+            &repo.branch,
+            repo.build_cmd.as_deref(),
+            &repo.build_dirs,
+        )
+        .await
+        {
+            Ok(()) => serde_json::json!({ "ok": true }).to_string(),
+            Err(e) => err_json(&format!("{e:#}")),
+        }
+    }
 }
 
 fn err_json(msg: &str) -> String {

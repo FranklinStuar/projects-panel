@@ -1,13 +1,13 @@
 #!/bin/bash
 # Helper CLI de Panel WP.
 #   wordpress-panel-cli detect-project <ruta>
-#   wordpress-panel-cli worktree list
-#   wordpress-panel-cli worktree create <rama> [--target <ruta>] [--base <rama>] [--copy-db]
-#   wordpress-panel-cli worktree remove <id-worktree> [--delete-branch]
+#   wordpress-panel-cli snapshot   {list|create|delete|clone} …
+#   wordpress-panel-cli git        {scan|status|pull|set-deploy|deploy} …
+#   wordpress-panel-cli worktree   {list|create|remove} …
 #
-# Las operaciones de worktree hablan con el panel EN EJECUCIÓN por D-Bus (reusan
-# su lógica: container, nginx, BD). Si el panel no está abierto, fallan pidiendo
-# abrirlo.
+# Todas las operaciones hablan con el panel EN EJECUCIÓN por D-Bus (reusan su
+# lógica: container, nginx, BD, git). Si el panel no está abierto, fallan
+# pidiendo abrirlo.
 set -e
 
 CMD="${1:-}"
@@ -47,6 +47,29 @@ dbus_call() {
     fi
 }
 
+# Llama un método que devuelve un String JSON y lo desenvuelve para jq.
+# gdbus envuelve el resultado en una tupla ('<json escapado>',); qdbus6 no.
+dbus_json() {
+    local raw pretty
+    if command -v qdbus6 >/dev/null 2>&1; then
+        # qdbus6 imprime el valor crudo, sin envoltura ni escapes.
+        raw="$(qdbus6 "$DBUS_DEST" "$DBUS_PATH" "$DBUS_IFACE.$1" "${@:2}")"
+    elif command -v gdbus >/dev/null 2>&1; then
+        raw="$(gdbus call --session --dest "$DBUS_DEST" --object-path "$DBUS_PATH" \
+            --method "$DBUS_IFACE.$1" "${@:2}")"
+        # Desenvuelve ('...',) y desescapa a JSON limpio.
+        raw="$(printf '%s' "$raw" | python3 -c 'import sys,ast; print(ast.literal_eval(sys.stdin.read())[0])')"
+    else
+        echo "error: ni gdbus ni qdbus6 disponibles para hablar con el panel" >&2
+        exit 3
+    fi
+    if pretty="$(printf '%s' "$raw" | jq . 2>/dev/null)"; then
+        printf '%s\n' "$pretty"
+    else
+        printf '%s\n' "$raw"
+    fi
+}
+
 require_panel() {
     if command -v gdbus >/dev/null 2>&1; then
         gdbus call --session --dest "$DBUS_DEST" --object-path "$DBUS_PATH" \
@@ -54,16 +77,189 @@ require_panel() {
     elif command -v qdbus6 >/dev/null 2>&1; then
         qdbus6 "$DBUS_DEST" "$DBUS_PATH" "$DBUS_IFACE.GetRunningSites" >/dev/null 2>&1 && return 0
     fi
-    echo "error: el panel WordPress no está en ejecución (ábrelo para usar worktrees)" >&2
+    echo "error: el panel WordPress no está en ejecución (ábrelo para usar el panel)" >&2
     exit 4
 }
 
+# Resuelve el proyecto del CWD o falla con mensaje claro. Ecoa "pid|ppath".
+project_or_die() {
+    project_for "$PWD" || { echo "no se detectó proyecto en $PWD" >&2; exit 1; }
+}
+
+# Infiere la ruta del repo git (relativa a app/public/) del CWD, dado ppath.
+# Ecoa la ruta relativa o falla (exit 2).
+git_target_path() {
+    local ppath="$1" top
+    top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    [ -n "$top" ] || { echo "indica --path <ruta relativa a public/> (no estás dentro de un repo git)" >&2; exit 2; }
+    local rel="${top#"$ppath"/app/public/}"
+    [ "$rel" != "$top" ] || { echo "el repo $top no está bajo este proyecto" >&2; exit 2; }
+    echo "$rel"
+}
+
+usage() {
+    cat <<'EOF'
+wordpress-panel-cli — CLI del Panel WP (habla con el panel EN EJECUCIÓN por D-Bus)
+
+USO:
+  wordpress-panel-cli <grupo> <subcomando> [opciones]
+
+detect-project <ruta>
+    Imprime el id del proyecto que contiene la ruta.
+
+snapshot   (autodetecta el proyecto del directorio actual)
+  snapshot list                     Lista los puntos de guardado.
+  snapshot create <label>           Crea un punto de guardado.
+  snapshot delete <snapshotId>      Borra un punto de guardado.
+  snapshot clone <snapshotId>       Crea un clon temporal desde el snapshot.
+
+git   (repo objetivo inferido del CWD; override con --path <ruta rel a public/>)
+  git scan                                    Lista repos del proyecto.
+  git status  [--path <p>] [--branch <b>]     Estado de la rama (ahead/behind/dirty).
+  git pull    [--path <p>] [--branch <b>]     git pull de la rama.
+  git set-deploy [--path <p>] --branch <b> [--build "<cmd>"] [--dirs a,b,c]
+                                              Configura el deploy (build + carpetas).
+  git deploy  [--path <p>]                    Ejecuta el deploy guardado.
+
+worktree   (autodetecta el proyecto del directorio actual)
+  worktree list
+  worktree create <rama> [--target <ruta>] [--base <rama>] [--copy-db]
+  worktree remove <id-worktree> [--delete-branch]
+
+EJEMPLOS:
+  cd ~/panel-wp/mi-sitio/app/public/wp-content/themes/mi-theme
+  wordpress-panel-cli snapshot create "antes del refactor"
+  wordpress-panel-cli snapshot list
+  wordpress-panel-cli git status --branch develop
+  wordpress-panel-cli git set-deploy --branch main --build "npm ci && npm run build" --dirs dist
+  wordpress-panel-cli git deploy
+  wordpress-panel-cli worktree create feature/nav --copy-db
+EOF
+}
+
 case "$CMD" in
+""|-h|--help|help)
+    usage
+    exit 0
+    ;;
+
 detect-project)
     ARG="${2:-}"
     [ -n "$ARG" ] || { echo "uso: wordpress-panel-cli detect-project <ruta>" >&2; exit 2; }
     info="$(project_for "$ARG")" || exit 1
     echo "${info%%|*}"
+    ;;
+
+snapshot)
+    SUB="${2:-}"
+    require_panel
+    info="$(project_or_die)"; pid="${info%%|*}"
+    case "$SUB" in
+    list)
+        dbus_json ListSnapshots "$pid" | jq -r '
+            (["ID","LABEL","FECHA","TAMAÑO"] | @tsv),
+            (.[] | [ .id, .label, .createdAt, ((.sizeBytes/1048576*10|round/10|tostring)+" MB") ] | @tsv)
+        ' | column -t -s $'\t'
+        ;;
+    create)
+        LABEL="${3:-}"
+        [ -n "$LABEL" ] || { echo "uso: snapshot create <label>" >&2; exit 2; }
+        dbus_json CreateSnapshot "$pid" "$LABEL"
+        ;;
+    delete)
+        SNAPID="${3:-}"
+        [ -n "$SNAPID" ] || { echo "uso: snapshot delete <snapshotId>" >&2; exit 2; }
+        if [ "$(dbus_call DeleteSnapshot "$pid" "$SNAPID" | tr -d ' ()' )" = "true" ]; then
+            echo "ok: snapshot $SNAPID borrado"
+        else
+            echo "fallo: no se pudo borrar el snapshot $SNAPID" >&2; exit 1
+        fi
+        ;;
+    clone)
+        SNAPID="${3:-}"
+        [ -n "$SNAPID" ] || { echo "uso: snapshot clone <snapshotId>" >&2; exit 2; }
+        res="$(dbus_json CreateClone "$pid" "$SNAPID")"
+        if [ "$(printf '%s' "$res" | jq -r '.ok')" = "true" ]; then
+            echo "clon creado: $(printf '%s' "$res" | jq -r '.domain')"
+        else
+            echo "fallo: $(printf '%s' "$res" | jq -r '.error // "error desconocido"')" >&2; exit 1
+        fi
+        ;;
+    *)
+        echo "uso: wordpress-panel-cli snapshot {list|create <label>|delete <snapshotId>|clone <snapshotId>}" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+
+git)
+    SUB="${2:-}"
+    require_panel
+    info="$(project_or_die)"; pid="${info%%|*}"; ppath="${info#*|}"
+    shift || true   # descarta "git"
+    shift || true   # descarta el subcomando
+    # Opciones comunes.
+    GPATH=""; GBRANCH=""; GBUILD=""; GDIRS=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --path) GPATH="$2"; shift 2 ;;
+            --branch) GBRANCH="$2"; shift 2 ;;
+            --build) GBUILD="$2"; shift 2 ;;
+            --dirs) GDIRS="$2"; shift 2 ;;
+            *) echo "opción desconocida: $1" >&2; exit 2 ;;
+        esac
+    done
+    case "$SUB" in
+    scan)
+        dbus_json GhScan "$pid" | jq -r '
+            (["PATH","BRANCH","REMOTE","REGISTRADO"] | @tsv),
+            (.[] | [ (.path // "(raíz)"), .branch, .remote, (if .registered then "sí" else "no" end) ] | @tsv)
+        ' | column -t -s $'\t'
+        ;;
+    status)
+        [ -n "$GPATH" ] || GPATH="$(git_target_path "$ppath")"
+        res="$(dbus_json GhBranchStatus "$pid" "$GPATH" "$GBRANCH")"
+        if [ "$(printf '%s' "$res" | jq -r '.ok // true')" = "false" ]; then
+            echo "fallo: $(printf '%s' "$res" | jq -r '.error // "error desconocido"')" >&2; exit 1
+        fi
+        printf '%s' "$res" | jq -r '
+            .message,
+            "  actual: \(.current)  objetivo: \(.target)",
+            "  ahead: \(.ahead)  behind: \(.behind)  dirty: \(.dirty)  canPull: \(.canPull)"
+        '
+        ;;
+    pull)
+        [ -n "$GPATH" ] || GPATH="$(git_target_path "$ppath")"
+        res="$(dbus_json GhPull "$pid" "$GPATH" "$GBRANCH")"
+        if [ "$(printf '%s' "$res" | jq -r '.ok')" = "true" ]; then
+            printf '%s\n' "$(printf '%s' "$res" | jq -r '.output')"
+        else
+            echo "fallo: $(printf '%s' "$res" | jq -r '.error // "error desconocido"')" >&2; exit 1
+        fi
+        ;;
+    set-deploy)
+        [ -n "$GPATH" ] || GPATH="$(git_target_path "$ppath")"
+        [ -n "$GBRANCH" ] || { echo "uso: git set-deploy [--path <p>] --branch <b> [--build \"<cmd>\"] [--dirs a,b,c]" >&2; exit 2; }
+        if [ "$(dbus_call GhSetDeploy "$pid" "$GPATH" "$GBRANCH" "$GBUILD" "$GDIRS" | tr -d ' ()' )" = "true" ]; then
+            echo "ok: deploy configurado para $GPATH ($GBRANCH)"
+        else
+            echo "fallo: no se pudo configurar el deploy" >&2; exit 1
+        fi
+        ;;
+    deploy)
+        [ -n "$GPATH" ] || GPATH="$(git_target_path "$ppath")"
+        res="$(dbus_json GhDeploy "$pid" "$GPATH")"
+        if [ "$(printf '%s' "$res" | jq -r '.ok')" = "true" ]; then
+            echo "ok: deploy ejecutado para $GPATH"
+        else
+            echo "fallo: $(printf '%s' "$res" | jq -r '.error // "error desconocido"')" >&2; exit 1
+        fi
+        ;;
+    *)
+        echo "uso: wordpress-panel-cli git {scan|status|pull|set-deploy|deploy} [--path <p>] [--branch <b>] …" >&2
+        exit 2
+        ;;
+    esac
     ;;
 
 worktree)
@@ -114,7 +310,7 @@ worktree)
     ;;
 
 *)
-    echo "wordpress-panel-cli: comando desconocido '$CMD'" >&2
+    echo "wordpress-panel-cli: comando desconocido '$CMD' (usa -h para ayuda)" >&2
     exit 2
     ;;
 esac

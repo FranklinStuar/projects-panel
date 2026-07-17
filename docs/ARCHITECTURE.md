@@ -236,6 +236,20 @@ interfaz `…Manager`:
 | `ListWorktrees(parentId)` | `String` (JSON) | Worktree-projects de un padre. |
 | `CreateWorktree(parentId, targetPath, branch, baseBranch, sharedDb)` | `String` (JSON `{ok,…}`) | Crea un worktree-project (lo usa el wrapper CLI). |
 | `RemoveWorktree(id, deleteBranch)` | `bool` | Elimina un worktree-project. |
+| `CreateSnapshot(id, label)` | `String` (JSON `{ok,snapshot}`) | Punto de guardado (reusa `snapshot::create_snapshot`). |
+| `ListSnapshots(id)` | `String` (JSON) | Puntos de guardado de un proyecto. |
+| `DeleteSnapshot(id, snapshotId)` | `bool` | Borra un punto de guardado. |
+| `CreateClone(parentId, snapshotId)` | `String` (JSON `{ok,id,domain}`) | Clone temporal desde un punto de guardado. |
+| `GhScan(id)` | `String` (JSON) | Repos git detectados. |
+| `GhPull(id, path, branch)` | `String` (JSON `{ok,output}`) | `git pull` de un repo. |
+| `GhBranchStatus(id, path, branch)` | `String` (JSON) | Estado de rama vs remoto (fetch + ahead/behind). |
+| `GhBuildDirs(id, path)` | `String` (JSON) | Carpetas candidatas de build. |
+| `GhSetDeploy(id, path, branch, buildCmd, buildDirsCsv)` | `bool` | Guarda config de deploy directo. |
+| `GhDeploy(id, path)` | `String` (JSON `{ok}`) | Deploy directo: checkout + pull --ff-only + build. |
+
+Todos los métodos de snapshot/clone/git los consume `wordpress-panel-cli`
+(`snapshot {list,create,delete,clone}`, `git {scan,status,pull,set-deploy,deploy}`);
+requieren el panel en ejecución. Args String/bool para simplificar `gdbus`.
 
 El plasmoid (`plasma/applets/wordpress-panel-plasmoid/`, Plasma 6) consulta cada
 3s vía `qdbus6` (DataSource `executable`) y pinta los proyectos activos con botón
