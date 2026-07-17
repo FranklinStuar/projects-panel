@@ -49,6 +49,28 @@ impl Manager {
         serde_json::to_string(&running).unwrap_or_else(|_| "[]".to_string())
     }
 
+    /// TODOS los proyectos con su estado: JSON `[{id,name,domain,group,running}]`.
+    /// Para el `wordpress-panel-cli list` (elegir cuál encender/apagar).
+    async fn list_sites(&self) -> String {
+        let docker = DockerManager::connect().ok();
+        let sites = config::load_all_sites().unwrap_or_default();
+        let mut out = Vec::new();
+        for s in sites {
+            let running = match &docker {
+                Some(d) => d.is_running(&s.container_name()).await,
+                None => false,
+            };
+            out.push(serde_json::json!({
+                "id": s.id,
+                "name": s.name,
+                "domain": s.domain,
+                "group": s.group,
+                "running": running,
+            }));
+        }
+        serde_json::to_string(&out).unwrap_or_else(|_| "[]".to_string())
+    }
+
     /// Detiene un proyecto. Devuelve true si no hubo error.
     async fn stop_site(&self, id: String) -> bool {
         let docker = match DockerManager::connect() {

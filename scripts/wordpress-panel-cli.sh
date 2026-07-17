@@ -86,6 +86,31 @@ project_or_die() {
     project_for "$PWD" || { echo "no se detectó proyecto en $PWD" >&2; exit 1; }
 }
 
+# Resuelve un proyecto a su id: sin arg → el del CWD; con arg → id exacto o
+# coincidencia por nombre (subcadena, ci) vía ListSites. Requiere el panel.
+# Ecoa el pid; falla (exit 1/2) con mensaje si no hay match o es ambiguo.
+resolve_pid() {
+    local arg="${1:-}"
+    if [ -z "$arg" ]; then
+        local info; info="$(project_or_die)"; echo "${info%%|*}"; return 0
+    fi
+    require_panel
+    local sites; sites="$(dbus_json ListSites)"
+    # id exacto
+    local byid; byid="$(printf '%s' "$sites" | jq -r --arg a "$arg" '.[]|select(.id==$a)|.id')"
+    if [ -n "$byid" ]; then echo "$byid"; return 0; fi
+    # nombre por subcadena (case-insensitive)
+    local matches; matches="$(printf '%s' "$sites" | jq -r --arg a "$arg" '.[]|select(.name|ascii_downcase|contains($a|ascii_downcase))|"\(.id)\t\(.name)"')"
+    local n; n="$(printf '%s' "$matches" | grep -c . || true)"
+    if [ "$n" = "0" ]; then echo "no hay proyecto que coincida con «$arg»" >&2; exit 1; fi
+    if [ "$n" != "1" ]; then
+        echo "«$arg» es ambiguo, coincide con:" >&2
+        printf '%s\n' "$matches" | cut -f2 | sed 's/^/  - /' >&2
+        exit 2
+    fi
+    printf '%s' "$matches" | cut -f1
+}
+
 # Infiere la ruta del repo git (relativa a app/public/) del CWD, dado ppath.
 # Ecoa la ruta relativa o falla (exit 2).
 git_target_path() {
@@ -126,8 +151,9 @@ worktree   (autodetecta el proyecto del directorio actual)
   worktree create <rama> [--target <ruta>] [--base <rama>] [--copy-db]
   worktree remove <id-worktree> [--delete-branch]
 
-start                               Enciende el proyecto (containers).
-stop                                Apaga el proyecto.
+list | ls                           Lista TODOS los proyectos con su estado (activo/parado).
+start [proyecto]                    Enciende un proyecto (por nombre/id, o el del CWD).
+stop  [proyecto]                    Apaga un proyecto (por nombre/id, o el del CWD).
 
 open <qué>   qué ∈ admin|site|front|folder
   open admin                        Abre el wp-admin (auto-login) en el navegador.
@@ -148,7 +174,8 @@ EJEMPLOS:
   wordpress-panel-cli git set-deploy --branch main --build "npm ci && npm run build" --dirs dist
   wordpress-panel-cli git deploy
   wordpress-panel-cli worktree create feature/nav --copy-db
-  wordpress-panel-cli start
+  wordpress-panel-cli list
+  wordpress-panel-cli start mi-sitio
   wordpress-panel-cli open admin
   wordpress-panel-cli open folder
   wordpress-panel-cli containers
@@ -330,9 +357,17 @@ worktree)
     esac
     ;;
 
+list|ls)
+    require_panel
+    dbus_json ListSites | jq -r '
+        (["ESTADO","NOMBRE","DOMINIO","GRUPO","ID"] | @tsv),
+        (.[] | [(if .running then "● activo" else "· parado" end), .name, .domain, (.group // "-"), .id] | @tsv)
+    ' | column -t -s $'\t'
+    ;;
+
 start)
     require_panel
-    info="$(project_or_die)"; pid="${info%%|*}"
+    pid="$(resolve_pid "${2:-}")"
     if [ "$(dbus_call StartSite "$pid" | tr -d ' ()')" = "true" ]; then
         echo "✓ Encendido"
     else
@@ -342,7 +377,7 @@ start)
 
 stop)
     require_panel
-    info="$(project_or_die)"; pid="${info%%|*}"
+    pid="$(resolve_pid "${2:-}")"
     if [ "$(dbus_call StopSite "$pid" | tr -d ' ()')" = "true" ]; then
         echo "✓ Apagado"
     else

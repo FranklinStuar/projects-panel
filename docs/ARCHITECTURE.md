@@ -246,6 +246,7 @@ interfaz `…Manager`:
 | `GhBuildDirs(id, path)` | `String` (JSON) | Carpetas candidatas de build. |
 | `GhSetDeploy(id, path, branch, buildCmd, buildDirsCsv)` | `bool` | Guarda config de deploy directo. |
 | `GhDeploy(id, path)` | `String` (JSON `{ok}`) | Deploy directo: checkout + pull --ff-only + build. |
+| `ListSites` | `String` (JSON `[{id,name,domain,group,running}]`) | Todos los proyectos con su estado (para `list`). |
 | `StartSite(id)` | `bool` | Enciende un proyecto y arranca el watcher de auto-dump. |
 | `OpenAdmin(id)` | `String` (JSON `{ok}`) | Abre wp-admin con auto-login (reusa `autologin`). |
 | `OpenSite(id)` | `String` (JSON `{ok,url}`) | Abre el frontend del proyecto en el navegador. |

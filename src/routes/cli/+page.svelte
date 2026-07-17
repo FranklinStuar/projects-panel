@@ -22,10 +22,11 @@
   const groups: { title: string; note?: string; items: { cmd: string; desc: string }[] }[] = [
     {
       title: 'Control del proyecto',
-      note: 'Autodetecta el proyecto por el directorio actual.',
+      note: 'start/stop admiten un proyecto por nombre o id; sin argumento usan el del directorio actual.',
       items: [
-        { cmd: 'wordpress-panel-cli start', desc: 'Enciende el proyecto (containers + nginx + auto-dump).' },
-        { cmd: 'wordpress-panel-cli stop', desc: 'Apaga el proyecto y los compartidos que ya nadie use.' },
+        { cmd: 'wordpress-panel-cli list', desc: 'Lista TODOS los proyectos con su estado (activo/parado), dominio y grupo.' },
+        { cmd: 'wordpress-panel-cli start [proyecto]', desc: 'Enciende el proyecto (containers + nginx + auto-dump).' },
+        { cmd: 'wordpress-panel-cli stop [proyecto]', desc: 'Apaga el proyecto y los compartidos que ya nadie use.' },
         { cmd: 'wordpress-panel-cli open admin', desc: 'Abre el wp-admin en el navegador con auto-login.' },
         { cmd: 'wordpress-panel-cli open site', desc: 'Abre la web pública (frontend) del proyecto.' },
         { cmd: 'wordpress-panel-cli open folder', desc: 'Abre la carpeta del proyecto en el explorador.' }
