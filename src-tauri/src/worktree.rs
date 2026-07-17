@@ -356,6 +356,11 @@ async fn add_worktree(
     }
     let dest_s = dest.to_string_lossy().to_string();
 
+    // Poda registros obsoletos: si un intento anterior falló a mitad, el repo del
+    // padre puede tener este dest «missing but already registered» y `add` se
+    // niega. `prune` es idempotente y no toca worktrees vivos.
+    git(repo, &["worktree", "prune"]).await.ok();
+
     // Intento 1: crear rama nueva.
     let mut args = vec!["worktree", "add", "-b", branch, &dest_s];
     if let Some(b) = base {
