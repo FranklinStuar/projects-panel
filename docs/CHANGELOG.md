@@ -679,6 +679,31 @@ además de `worktree {list,create,remove}`:
 Autodetecta el proyecto y el repo desde el CWD; salida con `jq`. Nuevos métodos
 D-Bus en `dbus.rs` que reusan `snapshot.rs`/`clone.rs`/`github.rs`.
 
+## MCP para agentes IA (`mcp/`)
+
+Servidor **MCP** (`mcp/server.mjs`, sin dependencias, protocolo por stdio a mano)
+que expone el panel a agentes (Claude Code, opencode). Es un **envoltorio fino**
+sobre `wordpress-panel-cli`: cada herramienta lanza el CLI, que habla con el panel
+en ejecución por D-Bus. No reimplementa lógica. Herramientas: `list_projects`,
+`start/stop_project`, `project_{containers,resources,logs}`, `open_project`,
+`{list,create,delete,clone}_snapshot`, `git_{scan,status,pull,set_deploy,deploy}`,
+`worktree_{list,create,remove}`. Ver `mcp/README.md`. Registrado en ámbito usuario
+en las tres configs de Claude (`~/.claude`, `~/.claude-work`, `~/.claude-custom`).
+
+- **Recarga reactiva de la UI ante mutaciones CLI/MCP** (`dbus.rs` +
+  `+page.svelte`): los métodos D-Bus que mutan proyectos (start/stop/all, create
+  worktree/clone, remove worktree) emiten el evento `sites-changed`; la lista de
+  proyectos se suscribe con `listen()` y se recarga sola, sin refrescar a mano.
+
+## Fixes
+
+- **panel-nginx zombie tras apagón sucio** (`docker.rs::reload_nginx`): al cortar
+  la corriente sin apagar Docker (p. ej. batería agotada), el daemon puede volver
+  marcando el container "running" pero con sus namespaces muertos; el `exec` de
+  `nginx -s reload` fallaba con `setns/nsexec` y no se podía encender ningún
+  proyecto. Ahora, si el reload falla, se fuerza el `remove` + `ensure_nginx`
+  (recrear = arranque fresco que relee todo `conf.d`, equivale al reload).
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).

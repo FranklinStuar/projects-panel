@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { listen } from '@tauri-apps/api/event';
   import { api } from '$lib/api';
   import type { SiteState, Endpoint } from '$lib/types';
   import ProjectDetail from '$lib/components/ProjectDetail.svelte';
@@ -174,7 +175,12 @@
     return out;
   });
 
-  onMount(load);
+  onMount(() => {
+    load();
+    // Recarga cuando el CLI/MCP muta proyectos por D-Bus (worktree, clone, start/stop…).
+    const un = listen('sites-changed', () => load());
+    return () => { un.then((f) => f()); };
+  });
 </script>
 
 <div class="flex h-full">

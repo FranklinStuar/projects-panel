@@ -65,6 +65,7 @@ src-tauri/src/           backend Rust
   backup.rs (export DB) / cli.rs (instala wrapper wp en ~/.local/bin)
 docker/                  Dockerfile php-fpm + entrypoint, plantillas, mu-plugins
 scripts/                 first-run.sh, wp-wrapper.sh, wordpress-panel-cli.sh
+mcp/                      servidor MCP (server.mjs) para agentes IA; envuelve el CLI
 ```
 
 ## Convenciones (no romper)

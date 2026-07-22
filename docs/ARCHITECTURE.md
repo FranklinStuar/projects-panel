@@ -206,7 +206,10 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 
 **Eventos** (backend → frontend, vía `app.emit`): `log:{id}` — una línea de log de
 container por evento; `op-log` — línea de progreso de una operación larga
-(migración/import/borrado), mostrada en `OpConsole.svelte`. El frontend se suscribe con `listen()` de `@tauri-apps/api/event`. Estado
+(migración/import/borrado), mostrada en `OpConsole.svelte`; `sites-changed` — sin
+payload, lo emiten los métodos D-Bus que mutan proyectos (start/stop, worktree,
+clone) para que la lista de `+page.svelte` se recargue sola tras un cambio hecho
+desde el CLI/MCP. El frontend se suscribe con `listen()` de `@tauri-apps/api/event`. Estado
 de los streams activos en `LogStreams` (managed state, `Mutex<HashMap>`).
 El canal `op-log` también lo emite el **frontend** (con `emit()`) para las líneas
 de la ventana de gracia del borrado (cuenta atrás de 5 s antes de llamar a
@@ -267,6 +270,13 @@ de detener + "Apagar todo y cerrar". No hay "encender todos" (requisito del
 usuario). Instalación: `kpackagetool6 --install` (lo hace `first-run.sh`).
 El servidor arranca en el `setup` de Tauri; si no hay sesión D-Bus, el panel
 sigue funcionando sin widget.
+
+**MCP (`mcp/`)** — envoltorio fino sobre `wordpress-panel-cli` (que a su vez habla
+por D-Bus con el panel en ejecución) que expone el panel a agentes IA vía MCP por
+stdio. Node sin dependencias (`mcp/server.mjs`); no reimplementa lógica ni guarda
+estado. Ver `mcp/README.md` para el catálogo de herramientas y el registro en
+Claude Code / opencode. Los métodos D-Bus que mutan proyectos emiten `sites-changed`
+para que la UI se recargue cuando el cambio viene del CLI/MCP.
 
 ## Rutas en disco
 

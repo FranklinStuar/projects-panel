@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use serde::Serialize;
-use tauri::Manager as _;
+use tauri::{Emitter as _, Manager as _};
 use tauri_plugin_opener::OpenerExt;
 use zbus::interface;
 
@@ -25,6 +25,12 @@ struct RunningSite {
 
 struct Manager {
     app: tauri::AppHandle,
+}
+
+/// Avisa al frontend de que la lista/estado de proyectos cambió por una
+/// mutación vía CLI/MCP (D-Bus), para que la UI recargue sola.
+fn notify_sites_changed(app: &tauri::AppHandle) {
+    let _ = app.emit("sites-changed", ());
 }
 
 #[interface(name = "com.goldmediatech.WordpressPanel.Manager")]
@@ -83,7 +89,9 @@ impl Manager {
         };
         // Parar el watcher de auto-dump antes del stop (igual que el comando Tauri).
         self.app.state::<crate::autodump::AutoDump>().stop(&id);
-        docker.stop_site(&site, &all).await.is_ok()
+        let ok = docker.stop_site(&site, &all).await.is_ok();
+        notify_sites_changed(&self.app);
+        ok
     }
 
     /// Detiene todos los proyectos activos.
@@ -99,6 +107,7 @@ impl Manager {
                 ok = false;
             }
         }
+        notify_sites_changed(&self.app);
         ok
     }
 
@@ -116,6 +125,7 @@ impl Manager {
             return false;
         }
         self.app.state::<crate::autodump::AutoDump>().start(site);
+        notify_sites_changed(&self.app);
         true
     }
 
@@ -229,7 +239,10 @@ impl Manager {
         )
         .await
         {
-            Ok(s) => serde_json::json!({ "ok": true, "id": s.id, "domain": s.domain }).to_string(),
+            Ok(s) => {
+                notify_sites_changed(&self.app);
+                serde_json::json!({ "ok": true, "id": s.id, "domain": s.domain }).to_string()
+            }
             Err(e) => err_json(&format!("{e:#}")),
         }
     }
@@ -240,9 +253,11 @@ impl Manager {
             Ok(d) => d,
             Err(_) => return false,
         };
-        crate::worktree::remove_worktree(&self.app, &docker, &id, delete_branch)
+        let ok = crate::worktree::remove_worktree(&self.app, &docker, &id, delete_branch)
             .await
-            .is_ok()
+            .is_ok();
+        notify_sites_changed(&self.app);
+        ok
     }
 
     // -- Snapshots, clones y git (los usa `wordpress-panel-cli`) --------------
@@ -289,7 +304,10 @@ impl Manager {
             Err(e) => return err_json(&e.to_string()),
         };
         match crate::clone::create_clone(&self.app, &docker, &parent_id, &snapshot_id).await {
-            Ok(s) => serde_json::json!({ "ok": true, "id": s.id, "domain": s.domain }).to_string(),
+            Ok(s) => {
+                notify_sites_changed(&self.app);
+                serde_json::json!({ "ok": true, "id": s.id, "domain": s.domain }).to_string()
+            }
             Err(e) => err_json(&format!("{e:#}")),
         }
     }

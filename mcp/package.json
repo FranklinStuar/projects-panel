@@ -1,0 +1,13 @@
+{
+  "name": "wordpress-panel-mcp",
+  "version": "0.1.0",
+  "description": "Servidor MCP de Panel WP (envoltorio sobre wordpress-panel-cli). Sin dependencias.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "wordpress-panel-mcp": "server.mjs"
+  },
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}
