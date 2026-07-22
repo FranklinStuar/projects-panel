@@ -639,7 +639,22 @@ impl DockerManager {
         if !self.is_running(NGINX).await {
             return Ok(());
         }
-        self.exec(NGINX, vec!["nginx", "-s", "reload"]).await?;
+        // Tras un apagón sucio, Docker puede marcar el container "running" pero con
+        // sus namespaces muertos (zombie): el exec falla con setns/nsexec. En ese
+        // caso lo recreamos —arrancar fresco relee todo conf.d, equivale al reload.
+        if self.exec(NGINX, vec!["nginx", "-s", "reload"]).await.is_err() {
+            self.docker
+                .remove_container(
+                    NGINX,
+                    Some(RemoveContainerOptions {
+                        force: true,
+                        ..Default::default()
+                    }),
+                )
+                .await
+                .ok();
+            self.ensure_nginx().await?;
+        }
         Ok(())
     }
 
