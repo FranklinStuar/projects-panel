@@ -278,7 +278,7 @@ fn site_config(id: &str, name: &str, path: &std::path::Path) -> SiteConfig {
         group: None,
         created_at: "2026-01-01T00:00:00Z".into(),
         services: Services {
-            php: PhpService { version: "8.3".into() },
+            php: PhpService { version: "8.3".into(), ..Default::default() },
             nginx: NginxService { ssl: true },
             db: DbService {
                 db_type: DbType::Mysql,
@@ -320,7 +320,7 @@ async fn db_lifecycle_idempotente() {
         group: Some("zztest".into()),
         created_at: "2026-01-01T00:00:00Z".into(),
         services: Services {
-            php: PhpService { version: "8.3".into() },
+            php: PhpService { version: "8.3".into(), ..Default::default() },
             nginx: NginxService { ssl: false },
             db: DbService {
                 db_type: DbType::Mysql,

@@ -47,6 +47,8 @@ export const api = {
   listWpUsers: (id: string) => invoke<WpUser[]>('list_wp_users', { id }),
   repairAutologin: (id: string) => invoke<SiteConfig>('repair_autologin', { id }),
   repairAllPhpIni: () => invoke<string>('repair_all_php_ini'),
+  setPhpUploadLimit: (id: string, mb: number) =>
+    invoke<SiteConfig>('set_php_upload_limit', { id, mb }),
   openSite: (id: string) => invoke<void>('open_site', { id }),
   openFolder: (id: string) => invoke<void>('open_folder', { id }),
   streamLogs: (id: string) => invoke<void>('stream_logs', { id }),

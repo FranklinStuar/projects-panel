@@ -110,7 +110,7 @@ mod tests {
             group: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             services: Services {
-                php: PhpService { version: "8.3".into() },
+                php: PhpService { version: "8.3".into(), ..Default::default() },
                 nginx: NginxService { ssl: true },
                 db: DbService {
                     db_type: DbType::Mysql,

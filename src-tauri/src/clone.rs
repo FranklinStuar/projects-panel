@@ -78,7 +78,7 @@ async fn run<R: Runtime>(
         group: parent.group.clone(),
         created_at: Utc::now().to_rfc3339(),
         services: Services {
-            php: PhpService { version: parent.services.php.version.clone() },
+            php: PhpService { version: parent.services.php.version.clone(), ..Default::default() },
             nginx: NginxService { ssl: parent.services.nginx.ssl },
             db: DbService {
                 db_type: parent.services.db.db_type,
@@ -251,7 +251,7 @@ mod tests {
             group: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             services: Services {
-                php: PhpService { version: "8.3".into() },
+                php: PhpService { version: "8.3".into(), ..Default::default() },
                 nginx: NginxService { ssl: true },
                 db: DbService {
                     db_type: DbType::Mysql,

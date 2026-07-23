@@ -4,6 +4,8 @@ export type DbType = 'mysql' | 'mariadb' | 'postgres';
 
 export interface PhpService {
   version: string;
+  /** Tope de subida (MB) del proyecto; undefined = default del panel (64M). */
+  uploadMaxMb?: number;
 }
 
 export interface NginxService {

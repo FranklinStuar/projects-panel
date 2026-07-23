@@ -167,6 +167,7 @@ pub fn import_site<R: Runtime>(app: &AppHandle<R>, local_id: &str) -> Result<Imp
         services: Services {
             php: PhpService {
                 version: php_version,
+                ..Default::default()
             },
             nginx: NginxService { ssl: true },
             db: DbService {

@@ -129,6 +129,37 @@ impl Manager {
         true
     }
 
+    /// Ajusta el tope de subida (MB) del proyecto: reescribe su php.ini
+    /// (`upload_max_filesize` + `post_max_size`) y recarga php-fpm si está activo.
+    /// `mb = 0` vuelve al default del template. JSON `{ok, uploadMaxMb}` o error.
+    async fn set_upload_limit(&self, id: String, mb: String) -> String {
+        let Ok(mb) = mb.trim().parse::<u32>() else {
+            return err_json("MB debe ser un entero (0 = default)");
+        };
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(mut site) = all.iter().find(|s| s.id == id).cloned() else {
+            return err_json("proyecto no encontrado");
+        };
+        site.services.php.upload_max_mb = if mb == 0 { None } else { Some(mb) };
+        if let Err(err) = crate::wordpress::write_php_ini(&site) {
+            return err_json(&err.to_string());
+        }
+        if let Err(err) = config::write_site_config(&site) {
+            return err_json(&err.to_string());
+        }
+        if let Ok(docker) = DockerManager::connect() {
+            if docker.is_running(&site.container_name()).await {
+                docker
+                    .exec(&site.container_name(), vec!["kill", "-USR2", "1"])
+                    .await
+                    .ok();
+            }
+        }
+        notify_sites_changed(&self.app);
+        serde_json::json!({ "ok": true, "uploadMaxMb": site.services.php.upload_max_mb })
+            .to_string()
+    }
+
     /// Abre el admin del proyecto con auto-login. JSON `{ok:true}` o error.
     async fn open_admin(&self, id: String) -> String {
         let all = config::load_all_sites().unwrap_or_default();

@@ -160,6 +160,9 @@ open <qué>   qué ∈ admin|site|front|folder
   open site | open front            Abre el frontend en el navegador.
   open folder                       Abre la carpeta del proyecto en el explorador.
 
+php upload <MB>                     Tope de subida del proyecto (upload_max_filesize +
+                                    post_max_size). 0 = default del panel (64M).
+
 containers                          Lista los containers del proyecto (name/role/running).
 resources                           docker stats de los containers del proyecto.
 
@@ -471,6 +474,28 @@ logs)
     esac
     docker inspect "$CONTAINER" >/dev/null 2>&1 || { echo "error: el container '$CONTAINER' no existe" >&2; exit 1; }
     docker logs --tail "$TAIL" $FOLLOW "$CONTAINER" || true
+    ;;
+
+php)
+    SUB="${2:-}"
+    require_panel
+    info="$(project_or_die)"; pid="${info%%|*}"
+    case "$SUB" in
+    upload)
+        MB="${3:-}"
+        [ -n "$MB" ] || { echo "uso: wordpress-panel-cli php upload <MB>   (0 = default del panel)" >&2; exit 2; }
+        res="$(dbus_json SetUploadLimit "$pid" "$MB")"
+        if [ "$(printf '%s' "$res" | jq -r '.ok')" = "true" ]; then
+            lim="$(printf '%s' "$res" | jq -r '.uploadMaxMb // empty')"
+            [ -n "$lim" ] && echo "✓ tope de subida = ${lim}M" || echo "✓ tope de subida = default del panel (64M)"
+        else
+            echo "✗ $(printf '%s' "$res" | jq -r '.error // "error desconocido"')" >&2; exit 1
+        fi
+        ;;
+    *)
+        echo "uso: wordpress-panel-cli php upload <MB>" >&2; exit 2
+        ;;
+    esac
     ;;
 
 *)

@@ -130,6 +130,17 @@ const TOOLS = [
     build: (a) => ({ argv: ['logs', a.service || 'php', '-n', String(a.lines || 200)], needProject: true }),
   },
   {
+    name: 'set_php_upload_limit',
+    description:
+      'Ajusta el tope de subida del proyecto (upload_max_filesize + post_max_size) para evitar el 413 al subir themes/plugins grandes. Se aplica en caliente si el proyecto está activo. mb=0 vuelve al default del panel (64M).',
+    schema: {
+      project: S.project,
+      mb: { type: 'integer', description: 'tope en MB (0 = default del panel, 64M)' },
+    },
+    required: req('project', 'mb'),
+    build: (a) => ({ argv: ['php', 'upload', String(a.mb)], needProject: true }),
+  },
+  {
     name: 'open_project',
     description: 'Abre en el escritorio el wp-admin (auto-login), el frontend o la carpeta del proyecto.',
     schema: {

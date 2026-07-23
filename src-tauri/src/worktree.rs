@@ -133,7 +133,7 @@ async fn run_create<R: tauri::Runtime>(
         group: parent.group.clone(),
         created_at: Utc::now().to_rfc3339(),
         services: Services {
-            php: PhpService { version: parent.services.php.version.clone() },
+            php: PhpService { version: parent.services.php.version.clone(), ..Default::default() },
             nginx: NginxService { ssl: parent.services.nginx.ssl },
             db: DbService {
                 db_type: parent.services.db.db_type,

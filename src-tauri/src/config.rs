@@ -54,9 +54,15 @@ impl DbType {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PhpService {
     pub version: String,
+    /// Tope de subida en MB para este proyecto: aplica a `upload_max_filesize` y
+    /// `post_max_size` del php.ini. `None` = default del template (64M). Editable
+    /// desde panel/CLI/MCP porque el 413 solo aparece en algunos proyectos.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_max_mb: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -571,7 +577,7 @@ mod tests {
             group: Some("LocalWP".into()),
             created_at: "2026-01-01T00:00:00Z".into(),
             services: Services {
-                php: PhpService { version: "8.3".into() },
+                php: PhpService { version: "8.3".into(), ..Default::default() },
                 nginx: NginxService { ssl: true },
                 db: DbService {
                     db_type: DbType::Mysql,

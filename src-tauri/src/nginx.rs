@@ -26,8 +26,14 @@ fn vhost_path(site: &SiteConfig) -> Result<PathBuf> {
 /// el `server_names_hash_bucket_size` por defecto (64) y nginx no arranca.
 pub fn ensure_tuning() -> Result<()> {
     let path = conf_d_dir()?.join("00-panel-tuning.conf");
-    std::fs::write(&path, "server_names_hash_bucket_size 128;\n")
-        .with_context(|| format!("escribiendo tuning nginx {:?}", path))?;
+    // `client_max_body_size 0` = sin límite en nginx: el tope real de subida lo
+    // pone el php.ini del proyecto (upload_max_filesize/post_max_size), no nginx.
+    // Sin esto, nginx corta con 413 los uploads >1M (default) aunque PHP los acepte.
+    std::fs::write(
+        &path,
+        "server_names_hash_bucket_size 128;\nclient_max_body_size 0;\n",
+    )
+    .with_context(|| format!("escribiendo tuning nginx {:?}", path))?;
     Ok(())
 }
 
@@ -182,7 +188,7 @@ mod tests {
             group: None,
             created_at: "2026-01-01T00:00:00Z".into(),
             services: Services {
-                php: PhpService { version: "8.3".into() },
+                php: PhpService { version: "8.3".into(), ..Default::default() },
                 nginx: NginxService { ssl },
                 db: DbService {
                     db_type: DbType::Mysql,

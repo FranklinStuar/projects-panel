@@ -128,6 +128,7 @@ pub async fn create_site(docker: &DockerManager, req: NewSiteRequest) -> Result<
         services: Services {
             php: PhpService {
                 version: req.php_version.clone(),
+                ..Default::default()
             },
             nginx: NginxService { ssl: req.ssl },
             db: DbService {
@@ -199,8 +200,16 @@ pub(crate) fn create_dirs(site: &SiteConfig) -> Result<()> {
 
 pub(crate) fn write_php_ini(site: &SiteConfig) -> Result<()> {
     let tmpl = crate::docker::docker_assets_dir().join("php.ini.tmpl");
-    let content = std::fs::read_to_string(&tmpl)
+    let mut content = std::fs::read_to_string(&tmpl)
         .unwrap_or_else(|_| DEFAULT_PHP_INI.to_string());
+    // Override por proyecto: en php.ini gana la última asignación, así que basta
+    // con anexar. Sube upload_max_filesize y post_max_size juntos (post debe ser
+    // ≥ upload). Editable desde panel/CLI/MCP; None = default del template.
+    if let Some(mb) = site.services.php.upload_max_mb {
+        content.push_str(&format!(
+            "\n; --- override del panel (por proyecto) ---\nupload_max_filesize = {mb}M\npost_max_size = {mb}M\n"
+        ));
+    }
     std::fs::write(site.php_ini(), content)?;
     Ok(())
 }

@@ -322,7 +322,7 @@ fn reconstruct_config(folder_name: &str, dir: &std::path::Path) -> SiteConfig {
         group: None,
         created_at: chrono::Utc::now().to_rfc3339(),
         services: Services {
-            php: PhpService { version: "8.3".into() },
+            php: PhpService { version: "8.3".into(), ..Default::default() },
             nginx: NginxService { ssl: true },
             db: DbService {
                 db_type: DbType::Mysql,
@@ -422,6 +422,26 @@ async fn repair_all_php_ini() -> CmdResult<String> {
             errors.join("\n")
         ))
     }
+}
+
+/// Ajusta el tope de subida (MB) del proyecto: reescribe su php.ini
+/// (`upload_max_filesize` + `post_max_size`) y, si está encendido, recarga
+/// php-fpm en caliente (SIGUSR2) para aplicarlo sin recrear el container.
+/// `mb = 0` vuelve al default del template (64M). Devuelve la config actualizada.
+#[tauri::command]
+async fn set_php_upload_limit(id: String, mb: u32) -> CmdResult<SiteConfig> {
+    let mut site = load_site(&id)?;
+    site.services.php.upload_max_mb = if mb == 0 { None } else { Some(mb) };
+    wordpress::write_php_ini(&site).map_err(e)?;
+    config::write_site_config(&site).map_err(e)?;
+    let docker = DockerManager::connect().map_err(e)?;
+    if docker.is_running(&site.container_name()).await {
+        docker
+            .exec(&site.container_name(), vec!["kill", "-USR2", "1"])
+            .await
+            .ok();
+    }
+    Ok(site)
 }
 
 /// Abre la web pública del proyecto (home, sin auto-login) en el navegador.
@@ -1030,6 +1050,7 @@ pub fn run() {
             list_wp_users,
             repair_autologin,
             repair_all_php_ini,
+            set_php_upload_limit,
             open_site,
             open_folder,
             open_terminal,

@@ -395,6 +395,29 @@
     }
   }
 
+  // Tope de subida (MB) por proyecto: evita el 413 al subir themes/plugins
+  // grandes. Aplica upload_max_filesize + post_max_size en el php.ini y recarga
+  // php-fpm en caliente si el proyecto está activo. 0/vacío = default del panel.
+  let uploadMb = $state<number | undefined>(undefined);
+  let savingUpload = $state(false);
+  $effect(() => {
+    // Re-sincroniza el input al cargar o cambiar de proyecto.
+    uploadMb = site?.config.services.php.uploadMaxMb;
+  });
+  async function saveUpload() {
+    if (!site) return;
+    savingUpload = true;
+    error = null;
+    try {
+      await api.setPhpUploadLimit(id, Number(uploadMb) || 0);
+      await load();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      savingUpload = false;
+    }
+  }
+
   // --- GitHub / Git ---------------------------------------------------------
   let gh = $state<GhStatus | null>(null);
   let ghError = $state<string | null>(null);
@@ -748,6 +771,25 @@
         {:else}
           No
         {/if}
+      </dd>
+      <dt class="text-zinc-500">Tope de subida</dt>
+      <dd class="flex items-center gap-2">
+        <input
+          type="number"
+          min="0"
+          placeholder="64"
+          bind:value={uploadMb}
+          class="w-20 rounded border border-zinc-300 bg-white py-1 px-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          title="MB — 0 o vacío = default del panel (64M)"
+        />
+        <span class="text-xs text-zinc-500">MB (0 = default)</span>
+        <button
+          class="rounded bg-zinc-200 px-2.5 py-1 text-sm font-medium disabled:opacity-50 dark:bg-zinc-800"
+          disabled={savingUpload}
+          onclick={saveUpload}
+        >
+          {savingUpload ? '…' : 'Guardar'}
+        </button>
       </dd>
       <dt class="text-zinc-500">Headless</dt>
       <dd>{site.config.headless ? (site.config.frontendFramework ?? 'Sí') : 'No'}</dd>
