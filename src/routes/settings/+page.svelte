@@ -188,6 +188,22 @@
           Aplicar a todos
         </button>
       </div>
+      <div class="flex items-center justify-between border-t border-zinc-800 px-4 py-3">
+        <div>
+          <div class="font-medium">Reparar nginx</div>
+          <div class="text-xs text-zinc-500">
+            Si ningún sitio carga tras un apagón sucio: poda vhosts huérfanos (de proyectos cuyo
+            container ya no corre) y reinicia el proxy nginx compartido.
+          </div>
+        </div>
+        <button
+          class="shrink-0 rounded bg-zinc-800 px-3 py-1.5 disabled:opacity-50"
+          disabled={busy}
+          onclick={() => run(() => api.repairNginx(), 'nginx reparado')}
+        >
+          Reparar nginx
+        </button>
+      </div>
     </div>
   </section>
 

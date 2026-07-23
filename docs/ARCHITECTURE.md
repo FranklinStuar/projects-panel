@@ -161,6 +161,7 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `list_wp_users` | `id` | `Vec<WpUser>` | Lista usuarios WP del proyecto (`ID`, `user_login`, `display_name`, `roles`). Requiere proyecto encendido. |
 | `repair_autologin` | `id` | `SiteConfig` | Activa `oneClickAdmin` y reinyecta los mu-plugins del panel (auto-login + mailpit). Para proyectos importados de LocalWP sin el plugin. No requiere proyecto encendido. |
 | `repair_all_php_ini` | — | `String` | Regenera el `php.ini` de todos los proyectos desde el template actual (aplica cambios como OPcache). Devuelve resumen de éxito/errores. Los proyectos deben reiniciarse para que surta efecto. |
+| `repair_nginx` | — | `String` | Recupera `panel-nginx` tras un apagón sucio: poda vhosts huérfanos (de proyectos cuyo container `wp-{id}` ya no corre, que abortan el arranque con `host not found in upstream`) y recrea el container. También en CLI/MCP no (solo panel). |
 | `set_php_upload_limit` | `id`, `mb` | `SiteConfig` | Tope de subida del proyecto: escribe `upload_max_filesize` + `post_max_size` en el php.ini y recarga php-fpm en caliente (SIGUSR2) si está activo. `mb=0` = default del template. Persistido en `services.php.uploadMaxMb`. Espejo en CLI (`php upload <MB>`), MCP (`set_php_upload_limit`) y D-Bus (`SetUploadLimit`). |
 | `stream_logs` | `id` | `()` | Inicia el stream de logs → eventos `log:{id}`. |
 | `stop_logs` | `id` | `()` | Detiene el stream de logs. |

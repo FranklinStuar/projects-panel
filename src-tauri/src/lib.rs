@@ -444,6 +444,19 @@ async fn set_php_upload_limit(id: String, mb: u32) -> CmdResult<SiteConfig> {
     Ok(site)
 }
 
+/// Repara el reverse-proxy nginx: poda vhosts huérfanos (de proyectos cuyo
+/// container ya no corre) y recrea el container. Úsalo cuando ningún sitio
+/// carga tras un apagón sucio (un upstream caído aborta el arranque de nginx).
+#[tauri::command]
+async fn repair_nginx() -> CmdResult<String> {
+    let docker = DockerManager::connect().map_err(e)?;
+    let pruned = docker.repair_nginx().await.map_err(e)?;
+    Ok(format!(
+        "nginx reiniciado. {} vhost(s) huérfano(s) podado(s).",
+        pruned.len()
+    ))
+}
+
 /// Abre la web pública del proyecto (home, sin auto-login) en el navegador.
 #[tauri::command]
 async fn open_site(app: AppHandle, id: String) -> CmdResult<()> {
@@ -1050,6 +1063,7 @@ pub fn run() {
             list_wp_users,
             repair_autologin,
             repair_all_php_ini,
+            repair_nginx,
             set_php_upload_limit,
             open_site,
             open_folder,

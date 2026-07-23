@@ -509,6 +509,10 @@ impl DockerManager {
 
         let conf_d = nginx::conf_d_dir()?;
         nginx::ensure_tuning()?; // dominios largos necesitan más hash bucket
+        // Un vhost cuyo upstream `wp-{id}` no corre hace que nginx aborte el
+        // arranque entero (`host not found in upstream`) y tumbe TODOS los
+        // sitios. Podarlos antes de arrancar → nginx se autocura.
+        self.prune_orphan_vhosts().await.ok();
         let projects = crate::config::projects_root()?;
 
         let mut ports = HashMap::new();
@@ -656,6 +660,53 @@ impl DockerManager {
             self.ensure_nginx().await?;
         }
         Ok(())
+    }
+
+    /// Poda vhosts huérfanos: borra `{id}.conf` de conf.d cuyo container
+    /// `wp-{id}` no esté corriendo. Refleja el modelo del panel (solo proyectos
+    /// activos aportan conf) y evita que un upstream caído aborte el arranque de
+    /// nginx. Devuelve los ids podados.
+    pub async fn prune_orphan_vhosts(&self) -> Result<Vec<String>> {
+        let dir = nginx::conf_d_dir()?;
+        let mut pruned = Vec::new();
+        for entry in std::fs::read_dir(&dir)?.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|x| x.to_str()) != Some("conf") {
+                continue;
+            }
+            let stem = match path.file_stem().and_then(|s| s.to_str()) {
+                Some(s) => s,
+                None => continue,
+            };
+            if stem.starts_with("00-") {
+                continue; // 00-panel-tuning.conf, no es vhost de proyecto
+            }
+            if !self.is_running(&format!("wp-{stem}")).await {
+                std::fs::remove_file(&path).ok();
+                pruned.push(stem.to_string());
+            }
+        }
+        Ok(pruned)
+    }
+
+    /// Recupera nginx tras un apagón sucio: poda vhosts huérfanos y recrea el
+    /// container (arrancar fresco relee todo conf.d). Devuelve los ids podados.
+    pub async fn repair_nginx(&self) -> Result<Vec<String>> {
+        let pruned = self.prune_orphan_vhosts().await?;
+        if self.exists(NGINX).await {
+            self.docker
+                .remove_container(
+                    NGINX,
+                    Some(RemoveContainerOptions {
+                        force: true,
+                        ..Default::default()
+                    }),
+                )
+                .await
+                .ok();
+        }
+        self.ensure_nginx().await?;
+        Ok(pruned)
     }
 
     // -- ciclo de vida de un proyecto ---------------------------------------
