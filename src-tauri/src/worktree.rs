@@ -485,6 +485,9 @@ fn find_free_slot(
 ) -> (String, std::path::PathBuf, String) {
     let domains: std::collections::HashSet<&str> =
         existing.iter().map(|s| s.domain.as_str()).collect();
+    // Una etiqueta DNS no puede pasar de 63 chars o el dominio no resuelve.
+    // 54 deja sitio al sufijo más largo ("-{8 hex}").
+    let base = base[..base.len().min(54)].trim_end_matches('-');
     for n in 0u32..=99 {
         let slug = if n == 0 { base.to_string() } else { format!("{base}-{n}") };
         let path = root.join(&slug);
@@ -530,6 +533,15 @@ mod tests {
         let (slug, _, domain) = find_free_slot(tmp.path(), "site-feat", &[]);
         assert_eq!(slug, "site-feat-1");
         assert_eq!(domain, "site-feat-1.test");
+    }
+
+    #[test]
+    fn find_free_slot_recorta_etiqueta_dns() {
+        let tmp = tempfile::tempdir().unwrap();
+        let largo = "pgnyc-feature-franklinp-sc-8429-update-info-learning-pods-madison";
+        let (slug, _, domain) = find_free_slot(tmp.path(), largo, &[]);
+        assert!(slug.len() <= 63, "{slug}");
+        assert!(domain.starts_with("pgnyc-feature-franklinp-"));
     }
 
     #[test]
