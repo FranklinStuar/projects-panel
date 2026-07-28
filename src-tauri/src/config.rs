@@ -507,7 +507,7 @@ pub fn list_disconnected_sites() -> Result<Vec<DisconnectedSite>> {
         if wp_config.exists() {
             out.push(DisconnectedSite {
                 name: folder_name.clone(),
-                domain: format!("{folder_name}.test"),
+                domain: format!("{}.test", crate::wordpress::dns_clamp(&folder_name)),
                 folder_name,
                 path,
                 php_version: DEFAULT_PHP.into(),

@@ -216,6 +216,10 @@ fn find_free_slot(
     let existing_domains: std::collections::HashSet<&str> =
         existing.iter().map(|s| s.domain.as_str()).collect();
 
+    // El base compone `{origen}-{etiqueta}`, así que hay que volver a recortarlo.
+    let base = crate::wordpress::dns_clamp(base);
+    let base = base.as_str();
+
     // Probar base, luego base-2, base-3, ...
     for n in 0u32..=99 {
         let slug = if n == 0 {

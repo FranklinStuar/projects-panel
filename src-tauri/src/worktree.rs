@@ -485,9 +485,9 @@ fn find_free_slot(
 ) -> (String, std::path::PathBuf, String) {
     let domains: std::collections::HashSet<&str> =
         existing.iter().map(|s| s.domain.as_str()).collect();
-    // Una etiqueta DNS no puede pasar de 63 chars o el dominio no resuelve.
-    // 54 deja sitio al sufijo más largo ("-{8 hex}").
-    let base = base[..base.len().min(54)].trim_end_matches('-');
+    // El base compone `{padre}-{rama}`, así que hay que volver a recortarlo.
+    let base = crate::wordpress::dns_clamp(base);
+    let base = base.as_str();
     for n in 0u32..=99 {
         let slug = if n == 0 { base.to_string() } else { format!("{base}-{n}") };
         let path = root.join(&slug);

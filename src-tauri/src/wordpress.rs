@@ -472,8 +472,21 @@ add_action( 'phpmailer_init', function ( $mailer ) {
 } );
 "#;
 
+/// Recorta un slug para que quepa como etiqueta DNS (máx. 63 bytes; por encima
+/// de eso el dominio simplemente no resuelve y el sitio queda inaccesible sin
+/// error visible). El tope es 54 para dejar sitio a los sufijos `-N` / `-{8 hex}`
+/// que añaden los buscadores de hueco al desambiguar.
+pub(crate) fn dns_clamp(slug: &str) -> String {
+    let mut cut = slug.len().min(54);
+    while !slug.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    slug[..cut].trim_end_matches('-').to_string()
+}
+
 pub(crate) fn slugify(name: &str) -> String {
-    name.trim()
+    let s = name
+        .trim()
         .to_lowercase()
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '-' })
@@ -481,12 +494,23 @@ pub(crate) fn slugify(name: &str) -> String {
         .split('-')
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
-        .join("-")
+        .join("-");
+    dns_clamp(&s)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::slugify;
+    use super::{dns_clamp, slugify};
+
+    #[test]
+    fn slug_cabe_en_una_etiqueta_dns() {
+        let largo = "a".repeat(80);
+        assert_eq!(slugify(&largo).len(), 54);
+        // No parte un char multibyte por la mitad.
+        assert!(dns_clamp(&"ñ".repeat(40)).len() <= 54);
+        // Sin guion colgando tras el corte.
+        assert!(!dns_clamp(&format!("{}-x", "b".repeat(53))).ends_with('-'));
+    }
 
     #[test]
     fn slugify_basico() {
