@@ -319,6 +319,16 @@ pub async fn remove_worktree<R: tauri::Runtime>(
             crate::wordpress::drop_database(docker, &db_container, &site).await.ok();
         }
         docker.teardown_unused_shared(&site, &all).await.ok();
+        // Si era el último proyecto (padre incluido) en ese motor+versión de
+        // DB, borra también su container y datadir compartido.
+        docker
+            .remove_db_if_orphaned(&site.services.db, &site.id, &all)
+            .await
+            .ok();
+        // Los dumps de app/sql/ del worktree ya no existen: poda sus entradas
+        // del log. Solo aquí: si `shared_db`, el db_name es el del padre y
+        // borraría también SUS entradas legítimas.
+        crate::dumplog::clean(None, Some(&site.services.db.db_name)).ok();
     }
 
     // Borrar la carpeta del worktree: no queda rastro del proyecto de prueba.
