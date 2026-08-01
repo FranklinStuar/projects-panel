@@ -21,6 +21,7 @@ agentes IA (Claude Code, opencode, …). Es un **envoltorio fino** sobre
 | `project_resources` | `docker stats` (CPU/mem) de esos containers. |
 | `project_logs` | Logs de un container (`service`: php\|db\|nginx\|mailpit\|minio, `lines`). |
 | `open_project` | Abre en escritorio `admin` (auto-login), `site` o `folder`. |
+| `admin_login_url` | URL de auto-login para abrirla en cualquier navegador (token 300 s, un solo uso). `user` = ID o login. |
 | `list_snapshots` / `create_snapshot` / `delete_snapshot` / `clone_snapshot` | Puntos de guardado. |
 | `git_scan` / `git_status` / `git_pull` / `git_set_deploy` / `git_deploy` | Git y deploy directo. |
 | `worktree_list` | Worktree-projects del proyecto. |

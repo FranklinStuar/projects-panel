@@ -254,6 +254,7 @@ interfaz `…Manager`:
 | `ListSites` | `String` (JSON `[{id,name,domain,group,running}]`) | Todos los proyectos con su estado (para `list`). |
 | `StartSite(id)` | `bool` | Enciende un proyecto y arranca el watcher de auto-dump. |
 | `OpenAdmin(id)` | `String` (JSON `{ok}`) | Abre wp-admin con auto-login (reusa `autologin`). |
+| `AdminUrl(id, user)` | `String` (JSON `{ok,url}`) | URL de auto-login SIN abrir navegador (para CLI/MCP; `user` = ID o login, vacío = primer admin; token 300 s de un solo uso). |
 | `OpenSite(id)` | `String` (JSON `{ok,url}`) | Abre el frontend del proyecto en el navegador. |
 | `ProjectContainers(id)` | `String` (JSON `[{name,role,running}]`) | Contenedores del proyecto (php + compartidos: db/nginx/mailpit/minio). |
 
