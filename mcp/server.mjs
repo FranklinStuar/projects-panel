@@ -151,6 +151,17 @@ const TOOLS = [
     build: (a) => ({ argv: ['open', a.what], needProject: true }),
   },
   {
+    name: 'admin_login_url',
+    description:
+      'Devuelve una URL de auto-login del proyecto para abrirla en CUALQUIER navegador (revisiones que exigen sesión iniciada). Token de un solo uso, válido 300 s: pide una nueva por cada carga. Sin «user» entra como el primer administrador.',
+    schema: {
+      project: S.project,
+      user: { type: 'string', description: 'ID numérico o user_login de WordPress (default: primer admin)' },
+    },
+    required: req('project'),
+    build: (a) => ({ argv: ['login-url', ...(a.user ? ['--user', String(a.user)] : [])], needProject: true }),
+  },
+  {
     name: 'list_snapshots',
     description: 'Lista los puntos de guardado (snapshots) de un proyecto.',
     schema: { project: S.project },

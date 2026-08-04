@@ -198,11 +198,22 @@ async fn delete_site(app: AppHandle, id: String, delete_folder: bool) -> CmdResu
         wordpress::drop_database(&docker, &db_container, &site).await.ok();
     }
     docker.teardown_unused_shared(&site, &all).await.ok();
+    // Si era el último proyecto en ese motor+versión de DB, borra también su
+    // container y datadir compartido (config_dir/db-data/...); si no, no queda
+    // nadie que lo necesite y solo ocuparía espacio para siempre.
+    docker
+        .remove_db_if_orphaned(&site.services.db, &site.id, &all)
+        .await
+        .ok();
 
     if delete_folder {
         // Borra la carpeta del proyecto entera.
         log(&app, "Borrando la carpeta del proyecto del disco…");
         std::fs::remove_dir_all(&site.path).map_err(e)?;
+        // Los dumps de app/sql/ ya no existen: poda las entradas del log que
+        // apuntaban a ellos (huérfanas, no a archivos de otro proyecto: el
+        // db_name incluye el slug del sitio).
+        dumplog::clean(None, Some(&site.services.db.db_name)).ok();
     } else {
         // Desconecta: en vez de borrar la config, la renombra a un sidecar
         // (`config.disconnected.json`). `load_all_sites()` solo escanea

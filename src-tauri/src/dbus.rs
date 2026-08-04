@@ -176,6 +176,46 @@ impl Manager {
         }
     }
 
+    /// URL de auto-login del admin, SIN abrir el navegador (para CLI/MCP: el
+    /// agente la carga en su propio navegador). `user` vacío = primer admin;
+    /// si no, ID numérico o user_login. Token de un solo uso, 300 s.
+    /// JSON `{ok,url}` o error.
+    async fn admin_url(&self, id: String, user: String) -> String {
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return err_json("proyecto no encontrado");
+        };
+        let docker = match DockerManager::connect() {
+            Ok(d) => d,
+            Err(e) => return err_json(&e.to_string()),
+        };
+        let user = user.trim();
+        let user_id = if user.is_empty() {
+            None
+        } else if let Ok(n) = user.parse::<u64>() {
+            Some(n)
+        } else {
+            // user_login → ID vía WP-CLI.
+            let args = vec![
+                "user".to_string(),
+                "get".to_string(),
+                user.to_string(),
+                "--field=ID".to_string(),
+            ];
+            match crate::wpcli::run(&docker, &site, &args).await {
+                Ok(out) => match out.trim().parse::<u64>() {
+                    Ok(n) => Some(n),
+                    Err(_) => return err_json(&format!("no existe el usuario «{user}»")),
+                },
+                Err(e) => return err_json(&format!("{e:#}")),
+            }
+        };
+        match crate::autologin::admin_url(&docker, &site, user_id, 300).await {
+            Ok(url) => serde_json::json!({ "ok": true, "url": url }).to_string(),
+            Err(e) => err_json(&format!("{e:#}")),
+        }
+    }
+
     /// Abre el frontend del proyecto en el navegador. JSON `{ok,url}` o error.
     async fn open_site(&self, id: String) -> String {
         let all = config::load_all_sites().unwrap_or_default();

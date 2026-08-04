@@ -912,6 +912,34 @@ impl DockerManager {
         Ok(())
     }
 
+    /// Si ningún otro proyecto (activo o no) sigue usando este motor+versión de
+    /// DB, para y borra su container compartido y su datadir bindeado
+    /// (`config_dir/db-data/{container}`) — ya no queda nada que lo necesite.
+    /// Llamar solo tras borrar definitivamente un proyecto/worktree.
+    pub async fn remove_db_if_orphaned(
+        &self,
+        db: &DbService,
+        exclude_id: &str,
+        all: &[SiteConfig],
+    ) -> Result<()> {
+        let still_used = all.iter().any(|s| {
+            s.id != exclude_id
+                && s.services.db.db_type == db.db_type
+                && s.services.db.version == db.version
+        });
+        if still_used {
+            return Ok(());
+        }
+        let cname = db_container_name(db);
+        self.docker
+            .stop_container(&cname, Some(StopContainerOptions { t: 10 }))
+            .await
+            .ok();
+        self.remove_container(&cname).await.ok();
+        std::fs::remove_dir_all(db_data_dir(db)?).ok();
+        Ok(())
+    }
+
     pub async fn site_status(&self, site: &SiteConfig) -> SiteStatus {
         if site.migration_pending {
             return SiteStatus::MigrationPending;
