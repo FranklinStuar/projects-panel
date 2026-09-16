@@ -5,6 +5,7 @@ mod autologin;
 mod backup;
 mod cli;
 mod clone;
+mod cloudflare;
 mod config;
 mod dbus;
 mod docker;
@@ -717,7 +718,6 @@ async fn open_adminer(app: AppHandle, id: String) -> CmdResult<()> {
 #[tauri::command]
 async fn feature_stub(feature: String) -> CmdResult<String> {
     let label = match feature.as_str() {
-        "cloudflare" => "Cloudflare Tunnel",
         "deploy" => "Deploy",
         "package" => "Empaquetado del sitio",
         other => other,
@@ -725,6 +725,55 @@ async fn feature_stub(feature: String) -> CmdResult<String> {
     Err(format!(
         "{label}: aún no implementado. Planificado para una fase posterior."
     ))
+}
+
+// -- Cloudflare Quick Tunnel ---------------------------------------------------
+
+/// Enciende el túnel público del proyecto (container `cf-{id}`, on-demand).
+/// El proyecto debe estar corriendo: el túnel reenvía a `panel-nginx`.
+#[tauri::command]
+async fn enable_tunnel(id: String) -> CmdResult<()> {
+    let site = load_site(&id)?;
+    let docker = DockerManager::connect().map_err(e)?;
+    if !docker.is_running(&site.container_name()).await {
+        return Err(format!("el proyecto '{}' no está encendido", site.name));
+    }
+    // Proyectos creados antes de este mu-plugin no lo tienen: lo inyecta aquí
+    // (idempotente) para que assets/enlaces funcionen bien por el túnel.
+    wordpress::sync_mu_plugins(&site).map_err(e)?;
+    docker.ensure_cloudflared(&site).await.map_err(e)
+}
+
+/// Apaga el túnel público del proyecto.
+#[tauri::command]
+async fn disable_tunnel(id: String) -> CmdResult<()> {
+    let docker = DockerManager::connect().map_err(e)?;
+    docker.stop_cloudflared(&id).await.map_err(e)
+}
+
+/// Estado del túnel: si corre y, en cuanto Cloudflare la publique, su URL
+/// pública (`https://algo.trycloudflare.com`, cambia en cada arranque).
+#[tauri::command]
+async fn tunnel_status(id: String) -> CmdResult<TunnelStatus> {
+    let docker = DockerManager::connect().map_err(e)?;
+    let running = docker.cloudflared_running(&id).await;
+    let url = if running {
+        docker
+            .cloudflared_log_tail(&id)
+            .await
+            .ok()
+            .and_then(|log| cloudflare::extract_url(&log))
+    } else {
+        None
+    };
+    Ok(TunnelStatus { running, url })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TunnelStatus {
+    running: bool,
+    url: Option<String>,
 }
 
 // -- Fase 5: clones temporales + puntos de guardado --------------------------
@@ -1111,6 +1160,9 @@ pub fn run() {
             open_minio,
             open_adminer,
             feature_stub,
+            enable_tunnel,
+            disable_tunnel,
+            tunnel_status,
             create_snapshot,
             list_snapshots,
             delete_snapshot,

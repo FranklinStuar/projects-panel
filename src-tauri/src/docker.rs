@@ -6,8 +6,8 @@
 
 use anyhow::{anyhow, Context, Result};
 use bollard::container::{
-    Config, CreateContainerOptions, ListContainersOptions, LogOutput, RemoveContainerOptions,
-    StartContainerOptions, StopContainerOptions,
+    Config, CreateContainerOptions, ListContainersOptions, LogOutput, LogsOptions,
+    RemoveContainerOptions, StartContainerOptions, StopContainerOptions,
 };
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
@@ -26,6 +26,7 @@ pub const NGINX: &str = "panel-nginx";
 pub const MAILPIT: &str = "panel-mailpit";
 pub const MINIO: &str = "panel-minio";
 pub const ADMINER: &str = "panel-adminer";
+pub const CLOUDFLARED_IMAGE: &str = "cloudflare/cloudflared:latest";
 
 /// Puertos host (solo 127.0.0.1) de las UIs de servicios compartidos.
 pub const MAILPIT_UI_PORT: u16 = 8025;
@@ -568,6 +569,129 @@ impl DockerManager {
         Ok(())
     }
 
+    // -- tunnel público (Cloudflare Quick Tunnel, por proyecto, on-demand) ---
+
+    /// Arranca (si hace falta) el túnel público del proyecto: container
+    /// `cf-{id}` dedicado, sin puertos publicados ni credenciales — el
+    /// hostname `*.trycloudflare.com` lo genera Cloudflare al vuelo. Reenvía
+    /// a `panel-nginx` reescribiendo el `Host:` al dominio local del proyecto
+    /// (`--http-host-header`), así el vhost `*.test` existente ya lo enruta
+    /// bien sin tocar `nginx.rs`.
+    ///
+    /// Si el proyecto tiene SSL activado, su vhost en `:80` es solo
+    /// `return 301 https://$host` (`nginx::render_vhost`) — con el Host
+    /// reescrito al dominio LOCAL, ese redirect manda al visitante público a
+    /// una URL que no resuelve fuera de esta máquina. Por eso en ese caso el
+    /// túnel entra directo por `:443` (`--origin-server-name` para el SNI,
+    /// `--no-tls-verify` porque el cert es de mkcert, no de una CA pública —
+    /// tráfico dentro de `panel-net`, no expuesto). Ver
+    /// `docs/CLOUDFLARE_TUNNEL_PLAN.md`.
+    pub async fn ensure_cloudflared(&self, site: &SiteConfig) -> Result<()> {
+        let name = cloudflared_container_name(&site.id);
+        if self.is_running(&name).await {
+            return Ok(());
+        }
+        if self.exists(&name).await {
+            self.docker
+                .start_container(&name, None::<StartContainerOptions<String>>)
+                .await?;
+            return Ok(());
+        }
+        self.ensure_network().await?;
+        self.ensure_image(CLOUDFLARED_IMAGE).await?;
+
+        // WordPress compara el Host recibido contra su `siteurl` (que incluye
+        // el puerto local del panel, p. ej. `pgnyc.test:8443`, porque
+        // panel-nginx publica en puertos altos para no chocar con LocalWP —
+        // ver `Endpoint::site_url`) y si no coincide EXACTO dispara su propio
+        // redirect canónico de vuelta a esa URL local, inalcanzable desde
+        // internet. Igualar el Host: header al `site_url` completo evita el
+        // redirect y sirve la página real (confirmado probando en vivo).
+        let public_host = crate::config::endpoint_or_default()
+            .site_url(&site.domain, site.services.nginx.ssl)
+            .split("://")
+            .nth(1)
+            .unwrap_or(&site.domain)
+            .to_string();
+
+        let mut cmd = vec![
+            "tunnel".to_string(),
+            "--http-host-header".to_string(),
+            public_host,
+            "--no-autoupdate".to_string(),
+        ];
+        if site.services.nginx.ssl {
+            cmd.push("--url".to_string());
+            cmd.push(format!("https://{NGINX}:443"));
+            cmd.push("--origin-server-name".to_string());
+            cmd.push(site.domain.clone());
+            cmd.push("--no-tls-verify".to_string());
+        } else {
+            cmd.push("--url".to_string());
+            cmd.push(format!("http://{NGINX}:80"));
+        }
+
+        let host_config = HostConfig {
+            network_mode: Some(NETWORK.to_string()),
+            ..Default::default()
+        };
+        let config = Config {
+            image: Some(CLOUDFLARED_IMAGE.to_string()),
+            cmd: Some(cmd),
+            host_config: Some(host_config),
+            ..Default::default()
+        };
+        self.docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: name.clone(),
+                    platform: None,
+                }),
+                config,
+            )
+            .await
+            .with_context(|| format!("creando container {name}"))?;
+        self.docker
+            .start_container(&name, None::<StartContainerOptions<String>>)
+            .await?;
+        Ok(())
+    }
+
+    /// Para y borra el túnel de un proyecto. Sin estado que conservar: el
+    /// hostname es efímero y se regenera en cada `run`.
+    pub async fn stop_cloudflared(&self, site_id: &str) -> Result<()> {
+        let name = cloudflared_container_name(site_id);
+        self.docker
+            .stop_container(&name, Some(StopContainerOptions { t: 5 }))
+            .await
+            .ok();
+        self.remove_container(&name).await.ok();
+        Ok(())
+    }
+
+    pub async fn cloudflared_running(&self, site_id: &str) -> bool {
+        self.is_running(&cloudflared_container_name(site_id)).await
+    }
+
+    /// Últimas líneas de log del túnel, para extraer la URL pública generada
+    /// (`cloudflare::extract_url`).
+    pub async fn cloudflared_log_tail(&self, site_id: &str) -> Result<String> {
+        let name = cloudflared_container_name(site_id);
+        let opts = LogsOptions::<String> {
+            follow: false,
+            stdout: true,
+            stderr: true,
+            tail: "50".to_string(),
+            ..Default::default()
+        };
+        let mut stream = self.docker.logs(&name, Some(opts));
+        let mut out = String::new();
+        while let Some(item) = stream.next().await {
+            out.push_str(&item?.to_string());
+        }
+        Ok(out)
+    }
+
     // -- selección del punto de publicación (endpoint) ----------------------
 
     /// Endpoint a usar: el persistido (estable para sitios ya instalados) o uno
@@ -845,6 +969,8 @@ impl DockerManager {
         }
         nginx::remove_vhost(site)?;
         self.reload_nginx().await.ok();
+        // El túnel no sirve de nada sin el proyecto ni panel-nginx corriendo.
+        self.stop_cloudflared(&site.id).await.ok();
 
         self.teardown_unused_shared(site, others).await.ok();
         Ok(())
@@ -951,7 +1077,6 @@ impl DockerManager {
         }
     }
 
-    #[allow(dead_code)] // limpieza de huérfanos / recrear container en Fase 2
     pub async fn remove_container(&self, name: &str) -> Result<()> {
         if self.exists(name).await {
             self.docker
@@ -1078,6 +1203,11 @@ impl DockerManager {
 // ---------------------------------------------------------------------------
 // helpers libres
 // ---------------------------------------------------------------------------
+
+/// Nombre del container del túnel público de un proyecto: `cf-{id}`.
+pub fn cloudflared_container_name(site_id: &str) -> String {
+    format!("cf-{site_id}")
+}
 
 /// Nombre del container DB compartido para un servicio (`panel-mysql-80`).
 pub fn db_container_name(db: &DbService) -> String {

@@ -589,7 +589,9 @@
   });
 
   onMount(load);
+  onMount(refreshTunnel);
   onDestroy(stopLogs);
+  onDestroy(stopTunnelPoll);
 
   // --- Servicios (Fase 3) ---------------------------------------------------
   let svcMsg = $state<string | null>(null);
@@ -608,6 +610,47 @@
       svcErr = String(e);
     } finally {
       svcBusy = false;
+    }
+  }
+
+  // --- Cloudflare Quick Tunnel -----------------------------------------------
+  let tunnel = $state<{ running: boolean; url: string | null } | null>(null);
+  let tunnelBusy = $state(false);
+  let tunnelErr = $state<string | null>(null);
+  let tunnelPoll: ReturnType<typeof setInterval> | null = null;
+
+  function stopTunnelPoll() {
+    if (tunnelPoll) { clearInterval(tunnelPoll); tunnelPoll = null; }
+  }
+
+  async function refreshTunnel() {
+    try {
+      tunnel = await api.tunnelStatus(id);
+      // Sigue consultando hasta que Cloudflare publique la URL; luego para.
+      if (tunnel.running && !tunnel.url && !tunnelPoll) {
+        tunnelPoll = setInterval(refreshTunnel, 1500);
+      } else if (!tunnel.running || tunnel.url) {
+        stopTunnelPoll();
+      }
+    } catch { /* proyecto sin iniciar u otro error transitorio: ignorar */ }
+  }
+
+  async function toggleTunnel() {
+    tunnelBusy = true;
+    tunnelErr = null;
+    try {
+      if (tunnel?.running) {
+        await api.disableTunnel(id);
+        tunnel = { running: false, url: null };
+        stopTunnelPoll();
+      } else {
+        await api.enableTunnel(id);
+        await refreshTunnel();
+      }
+    } catch (e) {
+      tunnelErr = String(e);
+    } finally {
+      tunnelBusy = false;
     }
   }
 
@@ -1160,10 +1203,33 @@
       (corre dentro del container). El proyecto debe estar encendido.
     </p>
 
+    <!-- Cloudflare Quick Tunnel -->
+    <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Exponer a internet</h3>
+    {#if tunnelErr}
+      <div class="mb-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">{tunnelErr}</div>
+    {/if}
+    <div class="mb-4 flex flex-wrap items-center gap-2 text-sm">
+      <button class="rounded bg-zinc-200 px-3 py-1.5 disabled:opacity-50 dark:bg-zinc-800"
+        disabled={tunnelBusy || (!tunnel?.running && site.status !== 'running')}
+        onclick={toggleTunnel}>
+        {tunnel?.running ? 'Dejar de exponer' : 'Exponer con Cloudflare Tunnel'}
+      </button>
+      {#if tunnel?.running && tunnel.url}
+        <a class="rounded bg-zinc-100 px-2 py-1 font-mono text-xs text-blue-600 hover:underline dark:bg-zinc-900" href={tunnel.url} target="_blank" rel="noopener">{tunnel.url}</a>
+      {:else if tunnel?.running}
+        <span class="text-xs text-zinc-500">generando URL pública…</span>
+      {:else if site.status !== 'running'}
+        <span class="text-xs text-zinc-500">(enciende el proyecto)</span>
+      {/if}
+    </div>
+    <p class="mb-4 text-xs text-zinc-500">
+      URL pública temporal (cambia cada vez que se enciende el túnel), sin cuenta ni dominio propio.
+    </p>
+
     <!-- Stubs -->
     <h3 class="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">Próximamente</h3>
     <div class="flex flex-wrap gap-2 text-sm">
-      {#each [['cloudflare', 'Cloudflare Tunnel'], ['deploy', 'Deploy'], ['package', 'Empaquetar sitio']] as [key, label] (key)}
+      {#each [['deploy', 'Deploy'], ['package', 'Empaquetar sitio']] as [key, label] (key)}
         <button class="rounded border border-dashed border-zinc-300 px-3 py-1.5 text-zinc-500 disabled:opacity-50 dark:border-zinc-700"
           disabled={svcBusy} onclick={() => svcAction(() => api.featureStub(key))}>{label}</button>
       {/each}

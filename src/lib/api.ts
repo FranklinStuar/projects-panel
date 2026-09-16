@@ -16,7 +16,8 @@ import type {
   SnapshotMeta,
   ExcludableEntry,
   WpUser,
-  DumpLogEntry
+  DumpLogEntry,
+  TunnelStatus
 } from './types';
 
 // Capa fina sobre los comandos IPC de Tauri (src-tauri/src/lib.rs).
@@ -103,6 +104,10 @@ export const api = {
   openMinio: () => invoke<void>('open_minio'),
   openAdminer: (id: string) => invoke<void>('open_adminer', { id }),
   featureStub: (feature: string) => invoke<string>('feature_stub', { feature }),
+  // Cloudflare Quick Tunnel: exponer el proyecto a internet (URL temporal)
+  enableTunnel: (id: string) => invoke<void>('enable_tunnel', { id }),
+  disableTunnel: (id: string) => invoke<void>('disable_tunnel', { id }),
+  tunnelStatus: (id: string) => invoke<TunnelStatus>('tunnel_status', { id }),
   // Fase 5: clones temporales + puntos de guardado
   createSnapshot: (id: string, label: string) =>
     invoke<SnapshotMeta>('create_snapshot', { id, label }),
