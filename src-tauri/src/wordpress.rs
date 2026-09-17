@@ -522,6 +522,9 @@ function panel_dynamic_url( $url ) {
     $query = wp_parse_url( $url, PHP_URL_QUERY );
     return $scheme . '://' . $host . $path . ( $query ? '?' . $query : '' );
 }
+add_filter( 'redirect_canonical', function ( $redirect_url ) {
+    return empty( $_SERVER['HTTP_X_FORWARDED_HOST'] ) ? $redirect_url : false;
+} );
 add_action( 'template_redirect', function () {
     if ( is_admin() || php_sapi_name() === 'cli' ) { return; }
     $host = $_SERVER['HTTP_X_FORWARDED_HOST'] ?? '';

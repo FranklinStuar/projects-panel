@@ -154,6 +154,13 @@ worktree   (autodetecta el proyecto del directorio actual)
   worktree create <rama> [--target <ruta>] [--base <rama>] [--copy-db]
   worktree remove <id-worktree> [--delete-branch]
 
+tunnel {enable|disable|status} [proyecto] [--minutes N]
+                                    Cloudflare Quick Tunnel: expone el proyecto a internet con
+                                    una URL pública temporal (*.trycloudflare.com, sin cuenta ni
+                                    dominio propio). Requiere el proyecto encendido. `--minutes`
+                                    (10-180, default 30) apaga el túnel solo pasado ese tiempo.
+                                    `status` imprime la URL cuando ya la publicó Cloudflare.
+
 list | ls                           Lista TODOS los proyectos con su estado (activo/parado).
 start [proyecto]                    Enciende un proyecto (por nombre/id, o el del CWD).
 stop  [proyecto]                    Apaga un proyecto (por nombre/id, o el del CWD).
@@ -396,6 +403,53 @@ stop)
     else
         echo "✗ falló" >&2; exit 1
     fi
+    ;;
+
+tunnel)
+    SUB="${2:-}"
+    require_panel
+    shift 2 || true   # descarta "tunnel" y el subcomando
+    MINUTES="30"; PROJ=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --minutes) MINUTES="$2"; shift 2 ;;
+            *) [ -z "$PROJ" ] && { PROJ="$1"; shift; } || { echo "opción desconocida: $1" >&2; exit 2; } ;;
+        esac
+    done
+    pid="$(resolve_pid "$PROJ")" || exit $?
+    case "$SUB" in
+    enable|on)
+        res="$(dbus_json EnableTunnel "$pid" "$MINUTES")"
+        if [ "$(printf '%s' "$res" | jq -r '.ok')" = "true" ]; then
+            echo "✓ Túnel encendido por $MINUTES min. Generando URL pública…"
+        else
+            echo "fallo: $(printf '%s' "$res" | jq -r '.error // "error desconocido"')" >&2; exit 1
+        fi
+        ;;
+    disable|off)
+        if [ "$(dbus_call DisableTunnel "$pid" | tr -d ' ()')" = "true" ]; then
+            echo "✓ Túnel apagado"
+        else
+            echo "✗ falló" >&2; exit 1
+        fi
+        ;;
+    status|url)
+        res="$(dbus_json TunnelStatus "$pid")"
+        running="$(printf '%s' "$res" | jq -r '.running')"
+        url="$(printf '%s' "$res" | jq -r '.url // empty')"
+        if [ "$running" != "true" ]; then
+            echo "apagado"
+        elif [ -n "$url" ]; then
+            echo "$url"
+        else
+            echo "encendido, generando URL…"
+        fi
+        ;;
+    *)
+        echo "uso: wordpress-panel-cli tunnel {enable|disable|status} [proyecto]" >&2
+        exit 2
+        ;;
+    esac
     ;;
 
 login-url)

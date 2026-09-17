@@ -40,6 +40,21 @@ function panel_dynamic_url( $url ) {
 }
 
 /**
+ * `redirect_canonical()` (wp-includes/canonical.php) arma la URL de redirect
+ * mezclando el host de la petición (`$_SERVER['HTTP_HOST']`, el LOCAL, para
+ * que nginx enrute bien) con el PUERTO de `home_url()` (que arriba dejamos
+ * dinámico = el del túnel, sin puerto) — produce una URL híbrida rota
+ * (host local + sin puerto), verificado en la portada por defecto (posts
+ * index, `is_front_page()`) de un sitio recién creado. Detrás de CUALQUIER
+ * proxy que cambie el dominio visible (no solo este túnel) esa comparación
+ * de "URL canónica" no tiene sentido — se desactiva solo si hay
+ * `X-Forwarded-Host` (cero efecto en el uso local normal).
+ */
+add_filter( 'redirect_canonical', function ( $redirect_url ) {
+    return empty( $_SERVER['HTTP_X_FORWARDED_HOST'] ) ? $redirect_url : false;
+} );
+
+/**
  * Media insertada en contenido (post_content, guid de adjuntos, ACF, etc.)
  * guarda su URL completa LITERAL en la base de datos — eso no pasa por
  * `content_url()`/`option_home` en cada request, así que los filtros de

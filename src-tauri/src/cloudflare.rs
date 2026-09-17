@@ -16,6 +16,28 @@ pub fn extract_url(log: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Resuelve un hostname a su primera IPv4 vía DNS-over-HTTPS (Cloudflare
+/// 1.1.1.1), sin pasar por el resolver del sistema. Necesario porque en
+/// algunas redes el DNS del ISP no resuelve bien subdominios
+/// `*.trycloudflare.com` recién creados (visto en producción: devuelve solo
+/// AAAA sin que la máquina tenga ruta IPv6 → `ERR_NAME_NOT_RESOLVED` en el
+/// navegador aunque el túnel esté sano). Ver `domain::set_tunnel_host`.
+pub async fn resolve_ipv4_via_doh(hostname: &str) -> anyhow::Result<String> {
+    let url = format!("https://1.1.1.1/dns-query?name={hostname}&type=A");
+    let json: serde_json::Value = reqwest::Client::new()
+        .get(&url)
+        .header("accept", "application/dns-json")
+        .send()
+        .await?
+        .json()
+        .await?;
+    json["Answer"]
+        .as_array()
+        .and_then(|answers| answers.iter().find_map(|a| a["data"].as_str()))
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("DoH no devolvió un registro A para {hostname}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

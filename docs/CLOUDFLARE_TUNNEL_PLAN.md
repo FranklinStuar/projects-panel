@@ -121,7 +121,7 @@ problemas encadenados, cada uno con su fix:
    el Host de la request. Resuelto con un mu-plugin nuevo,
    `docker/mu-plugins/panel-dynamic-url.php` (inyectado por
    `wordpress::sync_mu_plugins`, igual que mailpit/autologin):
-   - Filtra `option_siteurl`/`option_home`/`content_url`/`plugins_url`/
+   - Filtra `option_siteurl`/`option_home`/`content_url`/`plugins_url`/oru
      `theme_root_uri` para que usen el host real de la petición en vez del
      guardado en la DB. Respeta `X-Forwarded-Host` — **confirmado que
      `cloudflared` lo pone con el hostname público real del túnel**, aunque
@@ -175,6 +175,67 @@ igual que cualquier sitio. Probado end-to-end contra
 - Resultado verificado: HTML, CSS, JS e imágenes de `wp-content/uploads`
   cargando en 200 por la URL pública, cero referencias a `*.test` en el HTML
   final (ni el dominio del worktree ni el del padre).
+
+## Bug crítico adicional: `redirect_canonical()` rompía la portada por defecto
+
+Verificado con un test de integración real (`integration_tests::tunel_cloudflare_e2e`,
+crea un sitio WordPress **recién instalado**, sin personalizar — portada =
+listado de posts por defecto, `is_front_page()`): la portada devolvía **301 a
+una URL híbrida rota** (`https://{dominio-local}/`, sin puerto, ni el dominio
+local completo ni el del túnel). `pgnyc`/el worktree no lo mostraron porque su
+portada es una página estática, que no entra a esa rama de
+`wp-includes/canonical.php`.
+
+Causa exacta (`redirect_canonical()`, líneas ~612-616): arma el host del
+redirect desde `$_SERVER['HTTP_HOST']` (el LOCAL, necesario para que nginx
+enrute) pero el PUERTO desde `wp_parse_url(home_url())` (que el mu-plugin deja
+sin puerto, porque el túnel es `:443` estándar) — la mezcla de fuentes
+produce una URL que no es ninguna de las dos válidas.
+
+Fix: el mu-plugin ahora desactiva `redirect_canonical` por completo mientras
+hay `X-Forwarded-Host` (patrón estándar detrás de cualquier reverse proxy que
+cambia el dominio visible — la noción de "URL canónica" no aplica cuando el
+sitio es accesible por dos dominios a la vez a propósito). Cero efecto local
+(sin `X-Forwarded-Host`, el filtro no hace nada).
+
+## Test de integración permanente
+
+`src-tauri/src/integration_tests.rs::tunel_cloudflare_e2e` (`#[ignore]`, correr
+con `cargo test -- --ignored --test-threads=1 --exact
+integration_tests::tunel_cloudflare_e2e`): crea un sitio real con SSL,
+arranca el túnel con el código de producción (`docker::ensure_cloudflared`),
+extrae la URL con `cloudflare::extract_url`, resuelve por DoH (el resolver
+local del sistema puede tardar/fallar en resolver un subdominio
+`*.trycloudflare.com` recién creado — no es un bug del túnel) y verifica 200 +
+cero menciones al dominio local en el HTML. Deja este bug (portada por
+defecto) cubierto para siempre.
+
+## CLI y MCP
+
+`enable_tunnel`/`disable_tunnel`/`tunnel_status` también se exponen fuera de
+la GUI, mismo código detrás (D-Bus → `docker.rs`/`wordpress.rs`, igual que el
+comando Tauri):
+- **CLI** (`wordpress-panel-cli`, habla por D-Bus con el panel en ejecución):
+  `wordpress-panel-cli tunnel {enable|disable|status} [proyecto]`.
+- **MCP** (`mcp/server.mjs`, envuelve el CLI): tools `enable_tunnel`,
+  `disable_tunnel`, `tunnel_status`.
+
+Verificado en vivo contra el panel real corriendo (AppImage reconstruido):
+`tunnel enable` por CLI encendió `cf-{id}`, `tunnel status` devolvió la URL
+pública, y Playwright confirmó **el mismo diseño exacto** (mismas dimensiones
+de página, mismo layout/colores/imágenes, cero errores de consola) navegando
+`https://pgnyc.test:8443/` vs la URL del túnel.
+
+**Bug de aislamiento en los tests, encontrado y corregido en el camino**:
+`integration_tests.rs::teardown()` llamaba `docker.stop_site(site, &[])` — el
+`&[]` (lista vacía de "otros sitios activos") hacía que
+`teardown_unused_shared` apagara `panel-nginx`/DB/mailpit compartidos SIN
+chequear si había otros proyectos reales corriendo en la misma máquina.
+Preexistente (no introducido por el túnel), afectaba a CUALQUIER test de
+este archivo corrido en una máquina con el panel real activo — causó una
+interrupción real durante esta verificación (recuperada con
+`wordpress-panel-cli start <id>`). Fix: `teardown()` ahora pasa
+`config::load_all_sites()` en vez de `&[]`.
 
 ---
 

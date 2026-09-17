@@ -618,6 +618,26 @@
   let tunnelBusy = $state(false);
   let tunnelErr = $state<string | null>(null);
   let tunnelPoll: ReturnType<typeof setInterval> | null = null;
+  let tunnelCopied = $state(false);
+  let tunnelMinutes = $state(30);
+  let tunnelExpiresAt = $state<Date | null>(null);
+  const TUNNEL_DURATIONS = [10, 15, 30, 60, 90, 120, 180];
+
+  function formatTunnelDuration(minutes: number): string {
+    if (minutes < 60) return `${minutes} min`;
+    const h = minutes / 60;
+    return `${h % 1 === 0 ? h : h.toFixed(1)} h`;
+  }
+
+  async function copyTunnelUrl(url: string) {
+    try {
+      await navigator.clipboard.writeText(url);
+      tunnelCopied = true;
+      setTimeout(() => (tunnelCopied = false), 1500);
+    } catch (e) {
+      tunnelErr = String(e);
+    }
+  }
 
   function stopTunnelPoll() {
     if (tunnelPoll) { clearInterval(tunnelPoll); tunnelPoll = null; }
@@ -626,6 +646,7 @@
   async function refreshTunnel() {
     try {
       tunnel = await api.tunnelStatus(id);
+      if (!tunnel.running) tunnelExpiresAt = null; // se apagó (a mano o por el timer)
       // Sigue consultando hasta que Cloudflare publique la URL; luego para.
       if (tunnel.running && !tunnel.url && !tunnelPoll) {
         tunnelPoll = setInterval(refreshTunnel, 1500);
@@ -642,9 +663,11 @@
       if (tunnel?.running) {
         await api.disableTunnel(id);
         tunnel = { running: false, url: null };
+        tunnelExpiresAt = null;
         stopTunnelPoll();
       } else {
-        await api.enableTunnel(id);
+        await api.enableTunnel(id, tunnelMinutes);
+        tunnelExpiresAt = new Date(Date.now() + tunnelMinutes * 60_000);
         await refreshTunnel();
       }
     } catch (e) {
@@ -1209,19 +1232,36 @@
       <div class="mb-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">{tunnelErr}</div>
     {/if}
     <div class="mb-4 flex flex-wrap items-center gap-2 text-sm">
+      {#if !tunnel?.running}
+        <select class="rounded border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          disabled={tunnelBusy} bind:value={tunnelMinutes}>
+          {#each TUNNEL_DURATIONS as m (m)}
+            <option value={m}>{formatTunnelDuration(m)}</option>
+          {/each}
+        </select>
+      {/if}
       <button class="rounded bg-zinc-200 px-3 py-1.5 disabled:opacity-50 dark:bg-zinc-800"
         disabled={tunnelBusy || (!tunnel?.running && site.status !== 'running')}
         onclick={toggleTunnel}>
         {tunnel?.running ? 'Dejar de exponer' : 'Exponer con Cloudflare Tunnel'}
       </button>
       {#if tunnel?.running && tunnel.url}
-        <a class="rounded bg-zinc-100 px-2 py-1 font-mono text-xs text-blue-600 hover:underline dark:bg-zinc-900" href={tunnel.url} target="_blank" rel="noopener">{tunnel.url}</a>
+        {@const tunnelUrl = tunnel.url}
+        <button class="rounded bg-zinc-100 px-2 py-1 font-mono text-xs text-blue-600 hover:underline dark:bg-zinc-900"
+          onclick={() => api.openUrl(tunnelUrl)}>{tunnelUrl}</button>
+        <button class="rounded border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-700"
+          onclick={() => copyTunnelUrl(tunnelUrl)}>{tunnelCopied ? 'Copiado ✓' : 'Copiar'}</button>
       {:else if tunnel?.running}
         <span class="text-xs text-zinc-500">generando URL pública…</span>
       {:else if site.status !== 'running'}
         <span class="text-xs text-zinc-500">(enciende el proyecto)</span>
       {/if}
     </div>
+    {#if tunnel?.running && tunnelExpiresAt}
+      <p class="mb-2 text-xs text-amber-600 dark:text-amber-500">
+        Se apaga solo a las {tunnelExpiresAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.
+      </p>
+    {/if}
     <p class="mb-4 text-xs text-zinc-500">
       URL pública temporal (cambia cada vez que se enciende el túnel), sin cuenta ni dominio propio.
     </p>

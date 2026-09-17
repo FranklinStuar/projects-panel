@@ -105,6 +105,31 @@ const TOOLS = [
     build: (a) => ({ argv: ['stop', a.project] }),
   },
   {
+    name: 'enable_tunnel',
+    description:
+      'Expone el proyecto a internet con un Cloudflare Quick Tunnel: URL pública temporal (*.trycloudflare.com), sin cuenta ni dominio propio. Requiere el proyecto encendido; usa tunnel_status para leer la URL una vez publicada. Se apaga solo pasado «minutes» (10-180, default 30) para no dejarlo expuesto por olvido.',
+    schema: {
+      project: S.project,
+      minutes: { type: 'integer', description: 'tiempo de exposición en minutos, 10-180 (default 30)' },
+    },
+    required: req('project'),
+    build: (a) => ({ argv: ['tunnel', 'enable', a.project, '--minutes', String(a.minutes || 30)] }),
+  },
+  {
+    name: 'disable_tunnel',
+    description: 'Apaga el túnel público del proyecto.',
+    schema: { project: S.project },
+    required: req('project'),
+    build: (a) => ({ argv: ['tunnel', 'disable', a.project] }),
+  },
+  {
+    name: 'tunnel_status',
+    description: 'Estado del túnel del proyecto: apagado, encendido (generando URL) o la URL pública ya publicada por Cloudflare.',
+    schema: { project: S.project },
+    required: req('project'),
+    build: (a) => ({ argv: ['tunnel', 'status', a.project] }),
+  },
+  {
     name: 'project_containers',
     description: 'Lista los containers de un proyecto (php, db, nginx, mailpit, minio) y su estado.',
     schema: { project: S.project },

@@ -81,3 +81,66 @@ pub fn install_wildcard(ip: &str) -> Result<()> {
     }
     Ok(())
 }
+
+// -- /etc/hosts para túneles de Cloudflare -----------------------------------
+//
+// Workaround de red, no de DNS del panel: cuando el DNS del sistema no
+// resuelve bien un subdominio *.trycloudflare.com recién creado (ISPs que
+// devuelven solo AAAA sin ruta IPv6 → ERR_NAME_NOT_RESOLVED pese a que el
+// túnel está sano, visto en producción), se fija esa IP en `/etc/hosts` en
+// vez de tocar la configuración de DNS del sistema. Una línea por proyecto,
+// marcada para poder reemplazarla/borrarla sin tocar el resto del archivo.
+
+const HOSTS_PATH: &str = "/etc/hosts";
+
+fn tunnel_host_marker(site_id: &str) -> String {
+    format!("# panel-tunnel:{site_id}")
+}
+
+/// Reemplaza (por proyecto) la entrada `/etc/hosts` que resuelve `hostname` a
+/// `ip`. Requiere pkexec (diálogo gráfico). Valida el formato de ambos para
+/// no interpolar nada raro en el script de shell.
+pub fn set_tunnel_host(site_id: &str, hostname: &str, ip: &str) -> Result<()> {
+    if !is_safe_hostname(hostname) {
+        return Err(anyhow!("hostname con caracteres inesperados: {hostname}"));
+    }
+    if ip.parse::<std::net::Ipv4Addr>().is_err() {
+        return Err(anyhow!("IP inválida: {ip}"));
+    }
+    let marker = tunnel_host_marker(site_id);
+    let line = format!("{ip} {hostname} {marker}");
+    run_pkexec_hosts_edit(&marker, Some(&line))
+}
+
+/// Borra la entrada `/etc/hosts` de un proyecto (al apagar/expirar el túnel).
+/// Best-effort: se llama también cuando puede que nunca se haya llegado a
+/// crear (p. ej. el DoH de `resolve_ipv4_via_doh` falló).
+pub fn clear_tunnel_host(site_id: &str) -> Result<()> {
+    run_pkexec_hosts_edit(&tunnel_host_marker(site_id), None)
+}
+
+fn is_safe_hostname(h: &str) -> bool {
+    !h.is_empty()
+        && h.len() < 256
+        && h.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+}
+
+/// Quita cualquier línea con `marker` de `/etc/hosts` y, si `new_line` viene,
+/// la agrega. Vía pkexec, sin dejar el archivo a medio escribir si falla.
+fn run_pkexec_hosts_edit(marker: &str, new_line: Option<&str>) -> Result<()> {
+    let append = new_line.map(|l| format!("echo '{l}' >> {HOSTS_PATH}.tmp && ")).unwrap_or_default();
+    let script = format!(
+        "grep -vF '{marker}' {HOSTS_PATH} > {HOSTS_PATH}.tmp || true; \
+         {append}install -m 644 {HOSTS_PATH}.tmp {HOSTS_PATH} && rm -f {HOSTS_PATH}.tmp"
+    );
+    let status = std::process::Command::new("pkexec")
+        .arg("sh")
+        .arg("-c")
+        .arg(&script)
+        .status()
+        .map_err(|err| anyhow!("no se pudo ejecutar pkexec: {err}"))?;
+    if !status.success() {
+        return Err(anyhow!("pkexec no pudo editar /etc/hosts"));
+    }
+    Ok(())
+}

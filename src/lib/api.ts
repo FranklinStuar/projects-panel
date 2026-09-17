@@ -105,9 +105,10 @@ export const api = {
   openAdminer: (id: string) => invoke<void>('open_adminer', { id }),
   featureStub: (feature: string) => invoke<string>('feature_stub', { feature }),
   // Cloudflare Quick Tunnel: exponer el proyecto a internet (URL temporal)
-  enableTunnel: (id: string) => invoke<void>('enable_tunnel', { id }),
+  enableTunnel: (id: string, minutes: number) => invoke<void>('enable_tunnel', { id, minutes }),
   disableTunnel: (id: string) => invoke<void>('disable_tunnel', { id }),
   tunnelStatus: (id: string) => invoke<TunnelStatus>('tunnel_status', { id }),
+  openUrl: (url: string) => invoke<void>('open_url', { url }),
   // Fase 5: clones temporales + puntos de guardado
   createSnapshot: (id: string, label: string) =>
     invoke<SnapshotMeta>('create_snapshot', { id, label }),
