@@ -39,8 +39,14 @@ fn scratch_name() -> String {
 }
 
 /// Borra container + carpeta de un proyecto de prueba (best-effort).
+///
+/// Pasa `load_all_sites()` (no `&[]`) a `stop_site`: con lista vacía,
+/// `teardown_unused_shared` cree que ningún otro proyecto usa
+/// panel-nginx/DB/mailpit y los apaga — en una máquina con el panel real
+/// corriendo, eso corta proyectos ajenos al test.
 async fn teardown(docker: &DockerManager, site: &SiteConfig) {
-    docker.stop_site(site, &[]).await.ok();
+    let all = config::load_all_sites().unwrap_or_default();
+    docker.stop_site(site, &all).await.ok();
     docker.remove_container(&site.container_name()).await.ok();
     std::fs::remove_dir_all(&site.path).ok();
 }
@@ -390,5 +396,96 @@ async fn crear_exportar_migrar_e2e() {
         .expect("migrate_site");
     assert!(!mig.site.migration_pending, "tras migrar: no pendiente");
 
+    teardown(&docker, &site).await;
+}
+
+/// Cloudflare Quick Tunnel end-to-end: crea un sitio con SSL (la rama con más
+/// piezas: `:443` directo + `--http-host-header` con puerto + mu-plugin de URL
+/// dinámica), arranca `cf-{id}` con el código real de `docker::ensure_cloudflared`,
+/// extrae la URL pública del log con `cloudflare::extract_url` (igual que
+/// `tunnel_status`) y pega la página real por HTTPS. Falla si cloudflare tarda
+/// más de 30s en publicar la URL o si el body sigue mencionando el dominio local
+/// (señal de que el mu-plugin `panel-dynamic-url.php` no se instaló/aplicó).
+#[tokio::test]
+#[ignore = "e2e pesado: descarga WordPress, construye imagen y sale a internet; --ignored --test-threads=1"]
+async fn tunel_cloudflare_e2e() {
+    let docker = DockerManager::connect().expect("conectar a Docker");
+    docker.ensure_network().await.expect("panel-net");
+
+    let mut req = req_para(&scratch_name());
+    req.ssl = true; // ejercita la rama :443 + --origin-server-name + --no-tls-verify
+    let site = wordpress::create_site(&docker, req).await.expect("create_site");
+
+    docker.ensure_cloudflared(&site).await.expect("ensure_cloudflared");
+
+    let mut url = None;
+    for _ in 0..30 {
+        if let Ok(log) = docker.cloudflared_log_tail(&site.id).await {
+            if let Some(u) = crate::cloudflare::extract_url(&log) {
+                url = Some(u);
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    let url = url.expect("cloudflare no publicó la URL del túnel en 30s");
+    let host = url
+        .strip_prefix("https://")
+        .expect("URL de cloudflare siempre es https")
+        .trim_end_matches('/');
+
+    // El resolver DNS local (dnsmasq del propio panel, para *.test) a veces no
+    // resuelve un subdominio *.trycloudflare.com recién creado aunque ya esté
+    // publicado (confirmado: falla el resolver del sistema, no el túnel).
+    // Resolvemos por DoH y saltamos el resolver del sistema, igual que un
+    // `curl --resolve` manual.
+    let mut ip = None;
+    for _ in 0..15 {
+        let doh = format!("https://1.1.1.1/dns-query?name={host}&type=A");
+        if let Ok(resp) = reqwest::Client::new()
+            .get(&doh)
+            .header("accept", "application/dns-json")
+            .send()
+            .await
+        {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                if let Some(addr) = json["Answer"]
+                    .as_array()
+                    .and_then(|a| a.iter().find_map(|e| e["data"].as_str()))
+                {
+                    ip = Some(addr.to_string());
+                    break;
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+    let ip = ip.expect("no se pudo resolver el hostname del túnel por DoH en 30s");
+    let addr: std::net::SocketAddr = format!("{ip}:443").parse().expect("IP válida");
+    let client = reqwest::Client::builder()
+        .resolve(host, addr)
+        .build()
+        .expect("client reqwest");
+
+    let mut body = None;
+    for _ in 0..15 {
+        match client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                body = Some(resp.text().await.expect("leer body"));
+                break;
+            }
+            _ => tokio::time::sleep(std::time::Duration::from_secs(2)).await,
+        }
+    }
+    let body = body.unwrap_or_else(|| panic!("el túnel {url} no respondió 200 en 30s"));
+
+    assert!(
+        !body.contains(&site.domain),
+        "el HTML servido por el túnel sigue mencionando el dominio local {} — \
+         revisar docker/mu-plugins/panel-dynamic-url.php",
+        site.domain
+    );
+
+    docker.stop_cloudflared(&site.id).await.ok();
     teardown(&docker, &site).await;
 }

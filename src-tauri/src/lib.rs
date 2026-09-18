@@ -5,6 +5,7 @@ mod autologin;
 mod backup;
 mod cli;
 mod clone;
+mod cloudflare;
 mod config;
 mod dbus;
 mod docker;
@@ -49,6 +50,77 @@ fn e<E: std::fmt::Display>(err: E) -> String {
 /// Tareas de streaming de logs activas, por id de proyecto.
 #[derive(Default)]
 struct LogStreams(Mutex<HashMap<String, JoinHandle<()>>>);
+
+/// Temporizadores de auto-apagado del túnel público, por id de proyecto.
+/// El túnel expone el proyecto a internet: sin límite de tiempo, es fácil
+/// olvidarlo encendido. Vive solo en memoria del proceso (como `LogStreams`):
+/// si el panel se reinicia con un túnel activo, el timer se pierde y el
+/// container sigue corriendo hasta apagarlo a mano.
+#[derive(Default)]
+struct TunnelTimers(Mutex<HashMap<String, JoinHandle<()>>>);
+
+const TUNNEL_MIN_MINUTES: u32 = 10;
+const TUNNEL_MAX_MINUTES: u32 = 180;
+
+/// Cancela el timer de auto-apagado de un proyecto, si tiene uno.
+pub(crate) fn cancel_tunnel_timer(app: &AppHandle, id: &str) {
+    if let Some(h) = app.state::<TunnelTimers>().0.lock().unwrap().remove(id) {
+        h.abort();
+    }
+}
+
+/// Programa el apagado automático del túnel a los `minutes` indicados
+/// (10-180). Reemplaza cualquier timer previo del mismo proyecto.
+pub(crate) fn schedule_tunnel_timer(app: AppHandle, id: String, minutes: u32) {
+    cancel_tunnel_timer(&app, &id);
+    let minutes = minutes.clamp(TUNNEL_MIN_MINUTES, TUNNEL_MAX_MINUTES);
+    let task_id = id.clone();
+    let task_app = app.clone();
+    let handle = tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(minutes as u64 * 60)).await;
+        if let Ok(docker) = DockerManager::connect() {
+            docker.stop_cloudflared(&task_id).await.ok();
+        }
+        domain::clear_tunnel_host(&task_id).ok();
+        task_app.state::<TunnelTimers>().0.lock().unwrap().remove(&task_id);
+    });
+    app.state::<TunnelTimers>()
+        .0
+        .lock()
+        .unwrap()
+        .insert(id, handle);
+}
+
+/// Espera a que Cloudflare publique la URL del túnel y fija su IP en
+/// `/etc/hosts` (workaround para DNS de ISP que no resuelve bien subdominios
+/// `*.trycloudflare.com` recién creados — ver `domain::set_tunnel_host`).
+/// Best-effort y una sola vez por activación: si el DoH o el pkexec fallan
+/// (p. ej. el usuario canceló el diálogo de permisos), el túnel sigue andando
+/// igual para quien sí resuelva bien por su cuenta.
+pub(crate) fn spawn_tunnel_hosts_setup(id: String) {
+    tokio::spawn(async move {
+        let docker = match DockerManager::connect() {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        let mut url = None;
+        for _ in 0..30 {
+            if let Ok(log) = docker.cloudflared_log_tail(&id).await {
+                if let Some(u) = cloudflare::extract_url(&log) {
+                    url = Some(u);
+                    break;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        let Some(host) = url.as_deref().and_then(|u| u.strip_prefix("https://")) else {
+            return;
+        };
+        if let Ok(ip) = cloudflare::resolve_ipv4_via_doh(host).await {
+            domain::set_tunnel_host(&id, host, &ip).ok();
+        }
+    });
+}
 
 /// Lista todos los proyectos con su estado real (running / stopped / pending).
 #[tauri::command]
@@ -198,11 +270,22 @@ async fn delete_site(app: AppHandle, id: String, delete_folder: bool) -> CmdResu
         wordpress::drop_database(&docker, &db_container, &site).await.ok();
     }
     docker.teardown_unused_shared(&site, &all).await.ok();
+    // Si era el último proyecto en ese motor+versión de DB, borra también su
+    // container y datadir compartido (config_dir/db-data/...); si no, no queda
+    // nadie que lo necesite y solo ocuparía espacio para siempre.
+    docker
+        .remove_db_if_orphaned(&site.services.db, &site.id, &all)
+        .await
+        .ok();
 
     if delete_folder {
         // Borra la carpeta del proyecto entera.
         log(&app, "Borrando la carpeta del proyecto del disco…");
         std::fs::remove_dir_all(&site.path).map_err(e)?;
+        // Los dumps de app/sql/ ya no existen: poda las entradas del log que
+        // apuntaban a ellos (huérfanas, no a archivos de otro proyecto: el
+        // db_name incluye el slug del sitio).
+        dumplog::clean(None, Some(&site.services.db.db_name)).ok();
     } else {
         // Desconecta: en vez de borrar la config, la renombra a un sidecar
         // (`config.disconnected.json`). `load_all_sites()` solo escanea
@@ -472,6 +555,15 @@ async fn open_site(app: AppHandle, id: String) -> CmdResult<()> {
     app.opener().open_url(url, None::<&str>).map_err(e)
 }
 
+/// Abre una URL cualquiera en el navegador del sistema. Necesario para links
+/// generados en runtime (p. ej. la URL del túnel): un `<a target="_blank">`
+/// dentro del webview de Tauri no abre el navegador externo.
+#[tauri::command]
+async fn open_url(app: AppHandle, url: String) -> CmdResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_url(url, None::<&str>).map_err(e)
+}
+
 /// Abre la carpeta del proyecto en el explorador de archivos.
 #[tauri::command]
 async fn open_folder(app: AppHandle, id: String) -> CmdResult<()> {
@@ -706,7 +798,6 @@ async fn open_adminer(app: AppHandle, id: String) -> CmdResult<()> {
 #[tauri::command]
 async fn feature_stub(feature: String) -> CmdResult<String> {
     let label = match feature.as_str() {
-        "cloudflare" => "Cloudflare Tunnel",
         "deploy" => "Deploy",
         "package" => "Empaquetado del sitio",
         other => other,
@@ -714,6 +805,63 @@ async fn feature_stub(feature: String) -> CmdResult<String> {
     Err(format!(
         "{label}: aún no implementado. Planificado para una fase posterior."
     ))
+}
+
+// -- Cloudflare Quick Tunnel ---------------------------------------------------
+
+/// Enciende el túnel público del proyecto (container `cf-{id}`, on-demand).
+/// El proyecto debe estar corriendo: el túnel reenvía a `panel-nginx`.
+/// `minutes` (10-180) es el tiempo de exposición: pasado ese tiempo se apaga
+/// solo, para no dejarlo expuesto por olvido.
+#[tauri::command]
+async fn enable_tunnel(app: AppHandle, id: String, minutes: u32) -> CmdResult<()> {
+    let site = load_site(&id)?;
+    let docker = DockerManager::connect().map_err(e)?;
+    if !docker.is_running(&site.container_name()).await {
+        return Err(format!("el proyecto '{}' no está encendido", site.name));
+    }
+    // Proyectos creados antes de este mu-plugin no lo tienen: lo inyecta aquí
+    // (idempotente) para que assets/enlaces funcionen bien por el túnel.
+    wordpress::sync_mu_plugins(&site).map_err(e)?;
+    docker.ensure_cloudflared(&site).await.map_err(e)?;
+    schedule_tunnel_timer(app, id.clone(), minutes);
+    spawn_tunnel_hosts_setup(id);
+    Ok(())
+}
+
+/// Apaga el túnel público del proyecto (su timer de auto-apagado y su entrada
+/// en /etc/hosts, si tenía).
+#[tauri::command]
+async fn disable_tunnel(app: AppHandle, id: String) -> CmdResult<()> {
+    cancel_tunnel_timer(&app, &id);
+    domain::clear_tunnel_host(&id).ok();
+    let docker = DockerManager::connect().map_err(e)?;
+    docker.stop_cloudflared(&id).await.map_err(e)
+}
+
+/// Estado del túnel: si corre y, en cuanto Cloudflare la publique, su URL
+/// pública (`https://algo.trycloudflare.com`, cambia en cada arranque).
+#[tauri::command]
+async fn tunnel_status(id: String) -> CmdResult<TunnelStatus> {
+    let docker = DockerManager::connect().map_err(e)?;
+    let running = docker.cloudflared_running(&id).await;
+    let url = if running {
+        docker
+            .cloudflared_log_tail(&id)
+            .await
+            .ok()
+            .and_then(|log| cloudflare::extract_url(&log))
+    } else {
+        None
+    };
+    Ok(TunnelStatus { running, url })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TunnelStatus {
+    running: bool,
+    url: Option<String>,
 }
 
 // -- Fase 5: clones temporales + puntos de guardado --------------------------
@@ -997,6 +1145,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .manage(LogStreams::default())
+        .manage(TunnelTimers::default())
         .manage(AutoDump::default())
         .setup(|app| {
             // Instala los wrappers WP-CLI (`wp`, `wordpress-panel-cli`) una vez al
@@ -1067,6 +1216,7 @@ pub fn run() {
             set_php_upload_limit,
             open_site,
             open_folder,
+            open_url,
             open_terminal,
             stream_logs,
             stop_logs,
@@ -1100,6 +1250,9 @@ pub fn run() {
             open_minio,
             open_adminer,
             feature_stub,
+            enable_tunnel,
+            disable_tunnel,
+            tunnel_status,
             create_snapshot,
             list_snapshots,
             delete_snapshot,

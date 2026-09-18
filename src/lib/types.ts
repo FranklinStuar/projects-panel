@@ -257,3 +257,10 @@ export interface DumpLogEntry {
   /** `auto` | `stop` | `manual` */
   source: string;
 }
+
+/** Estado del Cloudflare Quick Tunnel de un proyecto (espejo de `TunnelStatus`). */
+export interface TunnelStatus {
+  running: boolean;
+  /** URL pública temporal (`https://algo.trycloudflare.com`), null hasta que Cloudflare la publique. */
+  url: string | null;
+}

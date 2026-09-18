@@ -92,7 +92,10 @@ project_or_die() {
 resolve_pid() {
     local arg="${1:-}"
     if [ -z "$arg" ]; then
-        local info; info="$(project_or_die)"; echo "${info%%|*}"; return 0
+        # project_or_die sale dentro de $( ) → hay que propagar el fallo a mano.
+        local info; info="$(project_or_die)" || return 1
+        [ -n "$info" ] || return 1
+        echo "${info%%|*}"; return 0
     fi
     require_panel
     local sites; sites="$(dbus_json ListSites)"
@@ -151,9 +154,21 @@ worktree   (autodetecta el proyecto del directorio actual)
   worktree create <rama> [--target <ruta>] [--base <rama>] [--copy-db]
   worktree remove <id-worktree> [--delete-branch]
 
+tunnel {enable|disable|status} [proyecto] [--minutes N]
+                                    Cloudflare Quick Tunnel: expone el proyecto a internet con
+                                    una URL pública temporal (*.trycloudflare.com, sin cuenta ni
+                                    dominio propio). Requiere el proyecto encendido. `--minutes`
+                                    (10-180, default 30) apaga el túnel solo pasado ese tiempo.
+                                    `status` imprime la URL cuando ya la publicó Cloudflare.
+
 list | ls                           Lista TODOS los proyectos con su estado (activo/parado).
 start [proyecto]                    Enciende un proyecto (por nombre/id, o el del CWD).
 stop  [proyecto]                    Apaga un proyecto (por nombre/id, o el del CWD).
+
+login-url [proyecto] [--user <id|login>]
+                                    Imprime una URL de auto-login (token de un solo uso,
+                                    300 s) para abrirla en CUALQUIER navegador. Sin --user
+                                    entra como el primer administrador.
 
 open <qué>   qué ∈ admin|site|front|folder
   open admin                        Abre el wp-admin (auto-login) en el navegador.
@@ -179,6 +194,8 @@ EJEMPLOS:
   wordpress-panel-cli worktree create feature/nav --copy-db
   wordpress-panel-cli list
   wordpress-panel-cli start mi-sitio
+  wordpress-panel-cli login-url
+  wordpress-panel-cli login-url mi-sitio --user editor01
   wordpress-panel-cli open admin
   wordpress-panel-cli open folder
   wordpress-panel-cli containers
@@ -370,7 +387,7 @@ list|ls)
 
 start)
     require_panel
-    pid="$(resolve_pid "${2:-}")"
+    pid="$(resolve_pid "${2:-}")" || exit $?
     if [ "$(dbus_call StartSite "$pid" | tr -d ' ()')" = "true" ]; then
         echo "✓ Encendido"
     else
@@ -380,11 +397,77 @@ start)
 
 stop)
     require_panel
-    pid="$(resolve_pid "${2:-}")"
+    pid="$(resolve_pid "${2:-}")" || exit $?
     if [ "$(dbus_call StopSite "$pid" | tr -d ' ()')" = "true" ]; then
         echo "✓ Apagado"
     else
         echo "✗ falló" >&2; exit 1
+    fi
+    ;;
+
+tunnel)
+    SUB="${2:-}"
+    require_panel
+    shift 2 || true   # descarta "tunnel" y el subcomando
+    MINUTES="30"; PROJ=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --minutes) MINUTES="$2"; shift 2 ;;
+            *) [ -z "$PROJ" ] && { PROJ="$1"; shift; } || { echo "opción desconocida: $1" >&2; exit 2; } ;;
+        esac
+    done
+    pid="$(resolve_pid "$PROJ")" || exit $?
+    case "$SUB" in
+    enable|on)
+        res="$(dbus_json EnableTunnel "$pid" "$MINUTES")"
+        if [ "$(printf '%s' "$res" | jq -r '.ok')" = "true" ]; then
+            echo "✓ Túnel encendido por $MINUTES min. Generando URL pública…"
+        else
+            echo "fallo: $(printf '%s' "$res" | jq -r '.error // "error desconocido"')" >&2; exit 1
+        fi
+        ;;
+    disable|off)
+        if [ "$(dbus_call DisableTunnel "$pid" | tr -d ' ()')" = "true" ]; then
+            echo "✓ Túnel apagado"
+        else
+            echo "✗ falló" >&2; exit 1
+        fi
+        ;;
+    status|url)
+        res="$(dbus_json TunnelStatus "$pid")"
+        running="$(printf '%s' "$res" | jq -r '.running')"
+        url="$(printf '%s' "$res" | jq -r '.url // empty')"
+        if [ "$running" != "true" ]; then
+            echo "apagado"
+        elif [ -n "$url" ]; then
+            echo "$url"
+        else
+            echo "encendido, generando URL…"
+        fi
+        ;;
+    *)
+        echo "uso: wordpress-panel-cli tunnel {enable|disable|status} [proyecto]" >&2
+        exit 2
+        ;;
+    esac
+    ;;
+
+login-url)
+    require_panel
+    shift || true
+    PROJ=""; WPUSER=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --user) WPUSER="$2"; shift 2 ;;
+            *) [ -z "$PROJ" ] && { PROJ="$1"; shift; } || { echo "opción desconocida: $1" >&2; exit 2; } ;;
+        esac
+    done
+    pid="$(resolve_pid "$PROJ")" || exit $?
+    res="$(dbus_json AdminUrl "$pid" "$WPUSER")"
+    if [ "$(printf '%s' "$res" | jq -r '.ok')" = "true" ]; then
+        printf '%s\n' "$(printf '%s' "$res" | jq -r '.url')"
+    else
+        echo "fallo: $(printf '%s' "$res" | jq -r '.error // "error desconocido"')" >&2; exit 1
     fi
     ;;
 

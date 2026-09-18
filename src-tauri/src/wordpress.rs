@@ -7,7 +7,7 @@
 use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use serde::Deserialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::process::Command;
 use uuid::Uuid;
 
@@ -397,15 +397,50 @@ async fn wp_core_install(
 /// de otro sistema puede traerlos desfasados.
 pub(crate) fn sync_mu_plugins(site: &SiteConfig) -> Result<()> {
     inject_mailpit_muplugin(site)?;
+    inject_dynamic_url_muplugin(site)?;
     if site.one_click_admin {
         inject_autologin_muplugin(site)?;
     }
     Ok(())
 }
 
+/// Carpeta `wp-content/mu-plugins` que el container REALMENTE monta. Un
+/// worktree-project no tiene su propio `public`: su container monta el del
+/// PADRE (`docker::create_php_container`), así que sus mu-plugins deben ir
+/// ahí — escribirlos en `site.public_dir()` propio crearía archivos que el
+/// container nunca ve. Sin padre resoluble, cae al propio `public_dir()`
+/// (más seguro que fallar: el peor caso es un mu-plugin no aplicado, no un
+/// proyecto roto).
+fn mu_plugins_dir(site: &SiteConfig) -> PathBuf {
+    let base = site
+        .worktree_of
+        .as_ref()
+        .and_then(|wt| crate::config::find_site(&wt.parent_id).ok().flatten())
+        .map(|parent| parent.public_dir())
+        .unwrap_or_else(|| site.public_dir());
+    base.join("wp-content").join("mu-plugins")
+}
+
+/// Inyecta el mu-plugin que sirve `siteurl`/`home` según el host real de la
+/// petición (`X-Forwarded-Host` si viene de un túnel, si no `Host`), para que
+/// assets/enlaces funcionen igual por `*.test` que por una URL pública
+/// temporal (Cloudflare Quick Tunnel). Sin efecto si no hay proxy de por
+/// medio: local sigue viendo el mismo dominio de siempre.
+fn inject_dynamic_url_muplugin(site: &SiteConfig) -> Result<()> {
+    let dir = mu_plugins_dir(site);
+    std::fs::create_dir_all(&dir)?;
+    let tmpl = crate::docker::docker_assets_dir()
+        .join("mu-plugins")
+        .join("panel-dynamic-url.php");
+    let content = std::fs::read_to_string(&tmpl)
+        .unwrap_or_else(|_| DEFAULT_DYNAMIC_URL_MUPLUGIN.to_string());
+    std::fs::write(dir.join("panel-dynamic-url.php"), content)?;
+    Ok(())
+}
+
 /// Inyecta el mu-plugin que enruta correos a Mailpit con header X-Project-ID.
 fn inject_mailpit_muplugin(site: &SiteConfig) -> Result<()> {
-    let dir = site.public_dir().join("wp-content").join("mu-plugins");
+    let dir = mu_plugins_dir(site);
     std::fs::create_dir_all(&dir)?;
 
     let tmpl = crate::docker::docker_assets_dir()
@@ -421,7 +456,7 @@ fn inject_mailpit_muplugin(site: &SiteConfig) -> Result<()> {
 
 /// Inyecta el mu-plugin de auto-login (token efímero de un solo uso).
 pub(crate) fn inject_autologin_muplugin(site: &SiteConfig) -> Result<()> {
-    let dir = site.public_dir().join("wp-content").join("mu-plugins");
+    let dir = mu_plugins_dir(site);
     std::fs::create_dir_all(&dir)?;
     let tmpl = crate::docker::docker_assets_dir()
         .join("mu-plugins")
@@ -469,6 +504,47 @@ add_action( 'phpmailer_init', function ( $mailer ) {
     $mailer->Port     = 1025;
     $mailer->SMTPAuth = false;
     $mailer->addCustomHeader( 'X-Project-ID', '__PROJECT_ID__' );
+} );
+"#;
+
+const DEFAULT_DYNAMIC_URL_MUPLUGIN: &str = r#"<?php
+defined( 'ABSPATH' ) || exit;
+foreach ( array( 'option_siteurl', 'option_home', 'content_url', 'plugins_url', 'theme_root_uri' ) as $panel_url_filter ) {
+    add_filter( $panel_url_filter, 'panel_dynamic_url' );
+}
+function panel_dynamic_url( $url ) {
+    if ( php_sapi_name() === 'cli' ) { return $url; }
+    $host = $_SERVER['HTTP_X_FORWARDED_HOST'] ?? $_SERVER['HTTP_HOST'] ?? '';
+    if ( $host === '' ) { return $url; }
+    $forwarded_https = ( $_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '' ) === 'https';
+    $scheme = ( $forwarded_https || is_ssl() ) ? 'https' : 'http';
+    $path = (string) wp_parse_url( $url, PHP_URL_PATH );
+    $query = wp_parse_url( $url, PHP_URL_QUERY );
+    return $scheme . '://' . $host . $path . ( $query ? '?' . $query : '' );
+}
+add_filter( 'redirect_canonical', function ( $redirect_url ) {
+    return empty( $_SERVER['HTTP_X_FORWARDED_HOST'] ) ? $redirect_url : false;
+} );
+add_action( 'template_redirect', function () {
+    if ( is_admin() || php_sapi_name() === 'cli' ) { return; }
+    $host = $_SERVER['HTTP_X_FORWARDED_HOST'] ?? '';
+    if ( $host === '' ) { return; }
+    global $wpdb;
+    $raw_home = $wpdb->get_var( "SELECT option_value FROM {$wpdb->options} WHERE option_name = 'home' LIMIT 1" );
+    $candidates = array( $raw_home, defined( 'WP_HOME' ) ? WP_HOME : null, defined( 'WP_SITEURL' ) ? WP_SITEURL : null );
+    $raw_hosts = array();
+    foreach ( $candidates as $raw ) {
+        if ( ! $raw ) { continue; }
+        $h = wp_parse_url( $raw, PHP_URL_HOST );
+        if ( ! $h ) { continue; }
+        $p = wp_parse_url( $raw, PHP_URL_PORT );
+        $raw_hosts[] = $p ? "{$h}:{$p}" : $h;
+    }
+    $raw_hosts = array_unique( $raw_hosts );
+    if ( empty( $raw_hosts ) ) { return; }
+    ob_start( function ( $html ) use ( $raw_hosts, $host ) {
+        return str_ireplace( $raw_hosts, $host, $html );
+    } );
 } );
 "#;
 

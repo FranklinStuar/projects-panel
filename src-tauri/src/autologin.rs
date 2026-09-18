@@ -23,13 +23,29 @@ pub async fn open_admin(
     site: &SiteConfig,
     user_id: Option<u64>,
 ) -> Result<()> {
+    let url = admin_url(docker, site, user_id, 60).await?;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|err| anyhow!("no se pudo abrir el navegador: {err}"))?;
+    Ok(())
+}
+
+/// Igual que `open_admin` pero devuelve la URL en vez de abrir el navegador
+/// (la usan el CLI y el MCP: el agente la carga en su propio navegador).
+/// `ttl_secs` = vida del token; el token es de un solo uso.
+pub async fn admin_url(
+    docker: &DockerManager,
+    site: &SiteConfig,
+    user_id: Option<u64>,
+    ttl_secs: u32,
+) -> Result<String> {
     if !docker.is_running(&site.container_name()).await {
         return Err(anyhow!("el proyecto '{}' no está encendido", site.name));
     }
 
     let base = crate::config::endpoint_or_default().site_url(&site.domain, site.services.nginx.ssl);
 
-    let url = if site.one_click_admin {
+    if site.one_click_admin {
         // Garantiza que el mu-plugin en disco sea siempre la versión actual.
         // Necesario para proyectos creados antes de que se añadiera soporte de user_id.
         wordpress::inject_autologin_muplugin(site).ok();
@@ -43,16 +59,11 @@ pub async fn open_admin(
             "set".to_string(),
             key,
             value,
-            "60".to_string(),
+            ttl_secs.to_string(),
         ];
         crate::wpcli::run(docker, site, &args).await?;
-        format!("{base}/?panel_autologin={token}")
+        Ok(format!("{base}/?panel_autologin={token}"))
     } else {
-        format!("{base}/wp-admin/")
-    };
-
-    app.opener()
-        .open_url(url, None::<&str>)
-        .map_err(|err| anyhow!("no se pudo abrir el navegador: {err}"))?;
-    Ok(())
+        Ok(format!("{base}/wp-admin/"))
+    }
 }
