@@ -303,6 +303,7 @@ fn site_config(id: &str, name: &str, path: &std::path::Path) -> SiteConfig {
         clone_of: None,
         worktree_of: None,
         snapshot_excludes: vec![],
+        autologin_user: None,
     }
 }
 
@@ -345,6 +346,7 @@ async fn db_lifecycle_idempotente() {
         clone_of: None,
         worktree_of: None,
         snapshot_excludes: vec![],
+        autologin_user: None,
     };
 
     let db_container = docker.ensure_db(&cfg.services.db).await.expect("ensure_db");

@@ -148,6 +148,7 @@ pub async fn create_site(docker: &DockerManager, req: NewSiteRequest) -> Result<
         clone_of: None,
         worktree_of: None,
         snapshot_excludes: vec![],
+        autologin_user: None,
     };
 
     // 1. estructura de carpetas
@@ -478,10 +479,8 @@ add_action( 'init', function () {
     if ( $stored === false ) { return; }
     delete_transient( $key );
     $user_id = intval( $stored );
-    if ( $user_id > 0 ) {
-        $user = get_userdata( $user_id );
-        if ( ! $user ) { return; }
-    } else {
+    $user = $user_id > 0 ? get_userdata( $user_id ) : false;
+    if ( ! $user ) {
         $admins = get_users( array( 'role' => 'administrator', 'number' => 1 ) );
         if ( empty( $admins ) ) { return; }
         $user = $admins[0];

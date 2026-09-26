@@ -26,12 +26,8 @@ add_action( 'init', function () {
     delete_transient( $key ); // un solo uso
 
     $user_id = intval( $stored );
-    if ( $user_id > 0 ) {
-        $user = get_userdata( $user_id );
-        if ( ! $user ) {
-            return;
-        }
-    } else {
+    $user = $user_id > 0 ? get_userdata( $user_id ) : false;
+    if ( ! $user ) { // 0 o usuario ya inexistente → primer administrador
         $admins = get_users( array( 'role' => 'administrator', 'number' => 1 ) );
         if ( empty( $admins ) ) {
             return;

@@ -159,6 +159,7 @@ async fn run_create<R: tauri::Runtime>(
             created_at: Utc::now().to_rfc3339(),
         }),
         snapshot_excludes: vec![],
+        autologin_user: None,
     };
 
     // Pasos [1/7]..[7/7] en un bloque: si algo falla a medias, se limpia todo

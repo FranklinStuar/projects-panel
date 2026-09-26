@@ -183,7 +183,7 @@ Las herramientas de UI, CLI y MCP **no se mezclan** en una misma operación: si 
 
 ## 5. Auto-login con selector de usuario
 
-`src-tauri/src/autologin.rs::open_admin` acepta `userId?: Option<u64>`. El frontend (`ProjectDetail.svelte::loadWpUsers`) llama `list_wp_users` para listar usuarios y los muestra en el `<select>` pegado al botón; persiste la selección en `localStorage` con clave `wp-panel:autologin:<id>`. La opción vacía = primer administrador (retrocompatible).
+`src-tauri/src/autologin.rs::open_admin` acepta `userId?: Option<u64>`. El frontend (`ProjectDetail.svelte::loadWpUsers`) llama `list_wp_users` para listar administradores y los muestra en el `<select>`; persiste la selección en `config.json` (`autologinUser`, comando `set_autologin_user`). Si el usuario guardado ya no existe, se limpia y se pide elegir otro. La opción vacía = primer administrador (retrocompatible).
 
 ### Precondiciones
 

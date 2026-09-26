@@ -188,6 +188,7 @@ pub fn import_site<R: Runtime>(app: &AppHandle<R>, local_id: &str) -> Result<Imp
         clone_of: None,
         worktree_of: None,
         snapshot_excludes: vec![],
+        autologin_user: None,
     };
 
     // Estructura + copia de archivos.

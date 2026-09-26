@@ -129,6 +129,7 @@ mod tests {
             clone_of: None,
             worktree_of: None,
             snapshot_excludes: vec![],
+            autologin_user: None,
         }
     }
 

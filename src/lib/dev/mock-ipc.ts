@@ -257,8 +257,9 @@ export function installMockIpc() {
       case 'list_wp_users':
         return [
           { ID: '1', user_login: 'admin', display_name: 'Admin', roles: 'administrator' },
-          { ID: '2', user_login: 'editor', display_name: 'Editor User', roles: 'editor' },
         ];
+      case 'set_autologin_user':
+        return null;
 
       // --- comandos sin efecto observable en mock ---
       case 'open_admin':

@@ -98,6 +98,7 @@ export interface SiteConfig {
   minio: boolean;
   migrationPending: boolean;
   lastMigratedAt: string | null;
+  autologinUser: number | null;
   cloneOf?: CloneInfo | null;
   /** Poblado si este sitio es un worktree-project. */
   worktreeOf?: WorktreeInfo | null;

@@ -46,6 +46,7 @@ export const api = {
     invoke<ImportResult>('import_disconnected_site', { folderName }),
   openAdmin: (id: string, userId?: number) => invoke<void>('open_admin', { id, userId }),
   listWpUsers: (id: string) => invoke<WpUser[]>('list_wp_users', { id }),
+  setAutologinUser: (id: string, userId: number | null) => invoke<void>('set_autologin_user', { id, userId }),
   repairAutologin: (id: string) => invoke<SiteConfig>('repair_autologin', { id }),
   repairAllPhpIni: () => invoke<string>('repair_all_php_ini'),
   repairNginx: () => invoke<string>('repair_nginx'),

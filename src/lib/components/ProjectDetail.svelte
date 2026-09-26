@@ -38,18 +38,15 @@
   let wpUsersLoaded = $state(false);
   let wpUsersLoading = $state(false);
 
-  function loadSavedUserId(): string {
-    try {
-      const raw = localStorage.getItem(`wp-panel:autologin:${id}`);
-      if (raw) return JSON.parse(raw).userId ?? '';
-    } catch {}
-    return '';
-  }
-  let selectedUserId = $state(loadSavedUserId());
+  // Usuario guardado en config.json (autologinUser); '' = primer admin.
+  let selectedUserId = $state('');
+  // El usuario guardado ya no existe (o dejó de ser admin): pedir elegir otro.
+  let savedUserMissing = $state(false);
 
   function saveUserId(val: string) {
     selectedUserId = val;
-    localStorage.setItem(`wp-panel:autologin:${id}`, JSON.stringify({ userId: val }));
+    savedUserMissing = false;
+    api.setAutologinUser(id, val ? Number(val) : null).catch((e) => (error = String(e)));
   }
 
   async function loadWpUsers() {
@@ -58,6 +55,15 @@
     try {
       wpUsers = await api.listWpUsers(id);
       wpUsersLoaded = true;
+      const saved = site?.config.autologinUser;
+      if (saved != null) {
+        if (wpUsers.some((u) => Number(u.ID) === saved)) {
+          selectedUserId = String(saved);
+        } else {
+          saveUserId('');
+          savedUserMissing = true;
+        }
+      }
     } catch {
       // silent — el select simplemente no aparece
     } finally {
@@ -819,7 +825,7 @@
       <dt class="text-zinc-500">Auto-login (One-click admin)</dt>
       <dd>
         {#if site.config.oneClickAdmin}
-          {#if site.status === 'running'}
+          {#if site.status === 'running' && wpUsersLoaded}
             <select
               class="rounded border border-zinc-300 bg-white py-1 pl-2 pr-6 text-sm dark:border-zinc-700 dark:bg-zinc-900"
               value={selectedUserId}
@@ -831,6 +837,9 @@
                 <option value={u.ID}>{u.display_name} ({u.user_login})</option>
               {/each}
             </select>
+            {#if savedUserMissing}
+              <span class="text-xs text-amber-600">El usuario guardado ya no existe; elige otro.</span>
+            {/if}
           {:else}
             Sí <span class="text-xs text-zinc-500">(enciende para elegir el usuario)</span>
           {/if}

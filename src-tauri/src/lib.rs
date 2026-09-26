@@ -424,6 +424,7 @@ fn reconstruct_config(folder_name: &str, dir: &std::path::Path) -> SiteConfig {
         clone_of: None,
         worktree_of: None,
         snapshot_excludes: vec![],
+        autologin_user: None,
     }
 }
 
@@ -450,7 +451,15 @@ async fn open_admin(app: AppHandle, id: String, user_id: Option<u64>) -> CmdResu
     autologin::open_admin(&app, &docker, &site, user_id).await.map_err(e)
 }
 
-/// Lista los usuarios de WordPress del proyecto (ID, login, display_name, roles).
+/// Guarda el usuario WP con el que entra el auto-login (None = primer admin).
+#[tauri::command]
+fn set_autologin_user(id: String, user_id: Option<u64>) -> CmdResult<()> {
+    let mut site = load_site(&id)?;
+    site.autologin_user = user_id;
+    config::write_site_config(&site).map_err(e)
+}
+
+/// Lista los administradores de WordPress del proyecto (ID, login, display_name, roles).
 #[tauri::command]
 async fn list_wp_users(id: String) -> CmdResult<Vec<serde_json::Value>> {
     let site = config::find_site(&id)
@@ -460,6 +469,7 @@ async fn list_wp_users(id: String) -> CmdResult<Vec<serde_json::Value>> {
     let args = vec![
         "user".to_string(),
         "list".to_string(),
+        "--role=administrator".to_string(),
         "--fields=ID,user_login,display_name,roles".to_string(),
         "--format=json".to_string(),
     ];
@@ -1210,6 +1220,7 @@ pub fn run() {
             import_disconnected_site,
             open_admin,
             list_wp_users,
+            set_autologin_user,
             repair_autologin,
             repair_all_php_ini,
             repair_nginx,

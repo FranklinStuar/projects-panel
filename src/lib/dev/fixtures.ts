@@ -32,6 +32,7 @@ export function makeSite(over: Partial<SiteConfig> & { id: string; name: string 
     minio: false,
     migrationPending: false,
     lastMigratedAt: null,
+    autologinUser: null,
     ...over
   };
 }

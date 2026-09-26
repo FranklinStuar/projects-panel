@@ -182,7 +182,8 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `list_disconnected_sites` | — | `Vec<DisconnectedSite>` | Carpetas de `~/panel-wp/` desconectadas (sin `config.json`): con `config.disconnected.json` (`preserved`) o con `app/public/wp-config.php` (`reconstructed`). |
 | `import_disconnected_site` | `folderName` | `ImportResult` | Re-importa una carpeta desconectada: restaura/reconstruye `config.json` y la deja `migrationPending`. Emite `op-log`. |
 | `open_admin` | `id`, `userId?` | `()` | Abre el admin en el navegador (auto-login si está activo). `userId` = ID de usuario WP destino; omitir o `0` = primer administrador. |
-| `list_wp_users` | `id` | `Vec<WpUser>` | Lista usuarios WP del proyecto (`ID`, `user_login`, `display_name`, `roles`). Requiere proyecto encendido. |
+| `list_wp_users` | `id` | `Vec<WpUser>` | Lista los administradores WP del proyecto (`--role=administrator`; `ID`, `user_login`, `display_name`, `roles`). Requiere proyecto encendido. |
+| `set_autologin_user` | `id, userId?` | `()` | Guarda en `config.json` (`autologinUser`) el usuario del auto-login. `open_admin` sin `userId` (CLI/D-Bus) lo usa; si ya no existe, el mu-plugin cae al primer admin. |
 | `repair_autologin` | `id` | `SiteConfig` | Activa `oneClickAdmin` y reinyecta los mu-plugins del panel (auto-login + mailpit). Para proyectos importados de LocalWP sin el plugin. No requiere proyecto encendido. |
 | `repair_all_php_ini` | — | `String` | Regenera el `php.ini` de todos los proyectos desde el template actual (aplica cambios como OPcache). Devuelve resumen de éxito/errores. Los proyectos deben reiniciarse para que surta efecto. |
 | `repair_nginx` | — | `String` | Recupera `panel-nginx` tras un apagón sucio: poda vhosts huérfanos (de proyectos cuyo container `wp-{id}` ya no corre, que abortan el arranque con `host not found in upstream`) y recrea el container. También en CLI/MCP no (solo panel). |

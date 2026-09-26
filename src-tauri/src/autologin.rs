@@ -52,8 +52,9 @@ pub async fn admin_url(
 
         let token = Uuid::new_v4().simple().to_string();
         let key = format!("panel_autologin_{token}");
-        // valor = user_id para login como usuario específico; "0" = primer admin
-        let value = user_id.unwrap_or(0).to_string();
+        // valor = user_id para login como usuario específico; "0" = primer admin.
+        // Sin user_id explícito (CLI, D-Bus) se usa el guardado en config.json.
+        let value = user_id.or(site.autologin_user).unwrap_or(0).to_string();
         let args = vec![
             "transient".to_string(),
             "set".to_string(),
