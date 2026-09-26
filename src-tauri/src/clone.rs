@@ -102,6 +102,7 @@ async fn run<R: Runtime>(
         }),
         worktree_of: None,
         snapshot_excludes: parent.snapshot_excludes.clone(),
+        autologin_user: parent.autologin_user,
     };
 
     // -- 1. Estructura de carpetas + php.ini + config.json --------------------
@@ -274,6 +275,7 @@ mod tests {
             clone_of: None,
             worktree_of: None,
             snapshot_excludes: vec![],
+            autologin_user: None,
         }
     }
 

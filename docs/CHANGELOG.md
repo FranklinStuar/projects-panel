@@ -704,6 +704,45 @@ en las tres configs de Claude (`~/.claude`, `~/.claude-work`, `~/.claude-custom`
   proyecto. Ahora, si el reload falla, se fuerza el `remove` + `ensure_nginx`
   (recrear = arranque fresco que relee todo `conf.d`, equivale al reload).
 
+## Cloudflare Quick Tunnel por proyecto
+
+Reemplaza el stub `feature_stub("cloudflare")`. Botón "Exponer a internet" en
+la pestaña Servicios: arranca `cf-{id}` (`cloudflare/cloudflared`, imagen
+pública, sin login/cuenta/dominio propio). Cloudflare genera un hostname
+aleatorio `*.trycloudflare.com` en su log al arrancar
+(`cloudflare::extract_url`, leído por `tunnel_status`); efímero por diseño,
+sin persistir nada en `config.json`. `stop_site` lo apaga siempre.
+
+Probado end-to-end contra un proyecto real con SSL activado; tres fixes que
+salieron de esa prueba:
+- Si el proyecto tiene SSL, el túnel entra directo por `https://panel-nginx:443`
+  (`--origin-server-name` + `--no-tls-verify`) en vez de `:80`, porque el
+  vhost en `:80` es solo `return 301 https://$host` y el Host reescrito
+  mandaba a un dominio local inalcanzable.
+- El `Host:` que manda el túnel debe igualar el `siteurl` EXACTO
+  (`Endpoint::site_url`, con el puerto alto del panel) o WordPress dispara su
+  propio redirect canónico hacia esa URL local.
+- Nuevo mu-plugin `docker/mu-plugins/panel-dynamic-url.php` (inyectado por
+  `wordpress::sync_mu_plugins`, junto a mailpit/autologin): sirve
+  `siteurl`/`home`/`content_url`/`plugins_url`/`theme_root_uri` según
+  `X-Forwarded-Host` (el hostname público real que `cloudflared` preserva
+  ahí) y reescribe URLs de media insertada en el HTML final (`ob_start` en
+  `template_redirect`, gateado en `X-Forwarded-Host`, cero costo local). Sin
+  esto, WordPress seguía sirviendo CSS/JS/imágenes desde el dominio local.
+
+Verificado también contra un worktree-project (`worktree.rs`, DB compartida)
+— encontró y arregló un bug real: `sync_mu_plugins` escribía en
+`site.public_dir()` propio, pero un worktree monta el `public` del PADRE en
+su container (`docker::create_php_container`), así que sus mu-plugins nunca
+se veían. Nuevo `wordpress::mu_plugins_dir()` resuelve al `public_dir()` del
+padre cuando `site.worktree_of` está poblado; aplica a los tres mu-plugins
+(mailpit, autologin, dynamic-url). También se generalizó el reemplazo de
+media para considerar las constantes `WP_HOME`/`WP_SITEURL` del wp-config
+propio del worktree, no solo el valor crudo de `wp_options.home` del padre.
+
+Detalle completo, incluida la prueba en vivo, en
+`docs/CLOUDFLARE_TUNNEL_PLAN.md`.
+
 ## Fase 4+ — Pendiente
 
 Ver `PLAN.md`: Fase 5 IA (`agent.rs`).

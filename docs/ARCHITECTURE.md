@@ -60,6 +60,30 @@ Nombre de DB compartida = `{prefix}-{version sin puntos}` (`DbType::service_pref
   `wp-cli.phar→/usr/local/bin/wp` (ro).
 - Env `PUID`/`PGID` = uid/gid del host (`docker::host_uid_gid()` vía getuid/getgid).
 
+### Túnel público por proyecto (on-demand, no automático)
+- Container `cf-{site-id}`, imagen `cloudflare/cloudflared:latest`. Cloudflare
+  Quick Tunnel: `tunnel --url http://panel-nginx:80 --http-host-header={domain}`.
+  Sin cuenta, dominio ni login — Cloudflare genera un hostname aleatorio
+  `*.trycloudflare.com` al arrancar (se lee del log del container, ver
+  `cloudflare::extract_url`).
+- No publica puertos, no guarda estado (el hostname es efímero, se regenera
+  en cada `run`). Solo corre si el usuario lo activa explícitamente («Exponer
+  a internet» en la pestaña Servicios) y el proyecto ya está encendido.
+  `stop_site` lo apaga siempre (no sirve de nada sin `wp-{id}`/`panel-nginx`).
+- El `Host:` header enviado debe igualar el `siteurl` EXACTO (dominio +
+  puerto local del panel, `Endpoint::site_url`) o WordPress dispara su
+  redirect canónico hacia esa URL local (inalcanzable desde internet).
+- Assets (CSS/JS/imágenes de uploads) funcionan por el túnel gracias al
+  mu-plugin `docker/mu-plugins/panel-dynamic-url.php` (inyectado por
+  `wordpress::sync_mu_plugins`): sirve `siteurl`/`home`/`content_url`/
+  `plugins_url`/`theme_root_uri` según `X-Forwarded-Host` (el hostname
+  público real que `cloudflared` preserva ahí aunque el Host: de routing sea
+  el local), y reescribe URLs de media insertada (literales en la DB) solo
+  cuando hay tráfico de túnel. Verificado en vivo: HTML, CSS, JS e imágenes
+  cargando en 200 desde la URL pública, cero referencias al dominio local.
+- Detalle completo, incluida la prueba en vivo, en
+  `docs/CLOUDFLARE_TUNNEL_PLAN.md`.
+
 ### Ciclo de vida (`docker.rs`)
 - **start_site**: ensure_network → ensure_db → crear/arrancar `wp-{id}` →
   `nginx::write_vhost` → ensure_nginx → reload_nginx → `domain::ensure_wildcard`.
@@ -158,7 +182,8 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `list_disconnected_sites` | — | `Vec<DisconnectedSite>` | Carpetas de `~/panel-wp/` desconectadas (sin `config.json`): con `config.disconnected.json` (`preserved`) o con `app/public/wp-config.php` (`reconstructed`). |
 | `import_disconnected_site` | `folderName` | `ImportResult` | Re-importa una carpeta desconectada: restaura/reconstruye `config.json` y la deja `migrationPending`. Emite `op-log`. |
 | `open_admin` | `id`, `userId?` | `()` | Abre el admin en el navegador (auto-login si está activo). `userId` = ID de usuario WP destino; omitir o `0` = primer administrador. |
-| `list_wp_users` | `id` | `Vec<WpUser>` | Lista usuarios WP del proyecto (`ID`, `user_login`, `display_name`, `roles`). Requiere proyecto encendido. |
+| `list_wp_users` | `id` | `Vec<WpUser>` | Lista los administradores WP del proyecto (`--role=administrator`; `ID`, `user_login`, `display_name`, `roles`). Requiere proyecto encendido. |
+| `set_autologin_user` | `id, userId?` | `()` | Guarda en `config.json` (`autologinUser`) el usuario del auto-login. `open_admin` sin `userId` (CLI/D-Bus) lo usa; si ya no existe, el mu-plugin cae al primer admin. |
 | `repair_autologin` | `id` | `SiteConfig` | Activa `oneClickAdmin` y reinyecta los mu-plugins del panel (auto-login + mailpit). Para proyectos importados de LocalWP sin el plugin. No requiere proyecto encendido. |
 | `repair_all_php_ini` | — | `String` | Regenera el `php.ini` de todos los proyectos desde el template actual (aplica cambios como OPcache). Devuelve resumen de éxito/errores. Los proyectos deben reiniciarse para que surta efecto. |
 | `repair_nginx` | — | `String` | Recupera `panel-nginx` tras un apagón sucio: poda vhosts huérfanos (de proyectos cuyo container `wp-{id}` ya no corre, que abortan el arranque con `host not found in upstream`) y recrea el container. También en CLI/MCP no (solo panel). |
@@ -195,6 +220,9 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `open_mailpit` | — | `()` | Abre la UI de Mailpit. |
 | `open_minio` | — | `()` | Abre la consola de MinIO. |
 | `open_adminer` | `id` | `()` | Arranca `panel-adminer` y abre el navegador en la DB del proyecto (requiere proyecto corriendo). |
+| `enable_tunnel` | `id` | `()` | Arranca `cf-{id}` (Cloudflare Quick Tunnel). Requiere el proyecto encendido. |
+| `disable_tunnel` | `id` | `()` | Para y borra `cf-{id}`. |
+| `tunnel_status` | `id` | `TunnelStatus{running,url}` | `url` es `null` hasta que Cloudflare la publica en el log (poll desde el frontend). |
 | `create_snapshot` | `id, label` | `SnapshotMeta` | Crea un punto de guardado (tar código + dump DB). Emite `op-log`. |
 | `list_snapshots` | `id` | `Vec<SnapshotMeta>` | Puntos de guardado del proyecto (desc por fecha). |
 | `delete_snapshot` | `id, snapshotId` | `()` | Borra un punto de guardado del disco. |
@@ -254,6 +282,7 @@ interfaz `…Manager`:
 | `ListSites` | `String` (JSON `[{id,name,domain,group,running}]`) | Todos los proyectos con su estado (para `list`). |
 | `StartSite(id)` | `bool` | Enciende un proyecto y arranca el watcher de auto-dump. |
 | `OpenAdmin(id)` | `String` (JSON `{ok}`) | Abre wp-admin con auto-login (reusa `autologin`). |
+| `AdminUrl(id, user)` | `String` (JSON `{ok,url}`) | URL de auto-login SIN abrir navegador (para CLI/MCP; `user` = ID o login, vacío = primer admin; token 300 s de un solo uso). |
 | `OpenSite(id)` | `String` (JSON `{ok,url}`) | Abre el frontend del proyecto en el navegador. |
 | `ProjectContainers(id)` | `String` (JSON `[{name,role,running}]`) | Contenedores del proyecto (php + compartidos: db/nginx/mailpit/minio). |
 

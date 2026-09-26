@@ -16,7 +16,8 @@ import type {
   SnapshotMeta,
   ExcludableEntry,
   WpUser,
-  DumpLogEntry
+  DumpLogEntry,
+  TunnelStatus
 } from './types';
 
 // Capa fina sobre los comandos IPC de Tauri (src-tauri/src/lib.rs).
@@ -45,6 +46,7 @@ export const api = {
     invoke<ImportResult>('import_disconnected_site', { folderName }),
   openAdmin: (id: string, userId?: number) => invoke<void>('open_admin', { id, userId }),
   listWpUsers: (id: string) => invoke<WpUser[]>('list_wp_users', { id }),
+  setAutologinUser: (id: string, userId: number | null) => invoke<void>('set_autologin_user', { id, userId }),
   repairAutologin: (id: string) => invoke<SiteConfig>('repair_autologin', { id }),
   repairAllPhpIni: () => invoke<string>('repair_all_php_ini'),
   repairNginx: () => invoke<string>('repair_nginx'),
@@ -103,6 +105,11 @@ export const api = {
   openMinio: () => invoke<void>('open_minio'),
   openAdminer: (id: string) => invoke<void>('open_adminer', { id }),
   featureStub: (feature: string) => invoke<string>('feature_stub', { feature }),
+  // Cloudflare Quick Tunnel: exponer el proyecto a internet (URL temporal)
+  enableTunnel: (id: string, minutes: number) => invoke<void>('enable_tunnel', { id, minutes }),
+  disableTunnel: (id: string) => invoke<void>('disable_tunnel', { id }),
+  tunnelStatus: (id: string) => invoke<TunnelStatus>('tunnel_status', { id }),
+  openUrl: (url: string) => invoke<void>('open_url', { url }),
   // Fase 5: clones temporales + puntos de guardado
   createSnapshot: (id: string, label: string) =>
     invoke<SnapshotMeta>('create_snapshot', { id, label }),

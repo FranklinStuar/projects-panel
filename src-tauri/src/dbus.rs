@@ -176,6 +176,46 @@ impl Manager {
         }
     }
 
+    /// URL de auto-login del admin, SIN abrir el navegador (para CLI/MCP: el
+    /// agente la carga en su propio navegador). `user` vacío = primer admin;
+    /// si no, ID numérico o user_login. Token de un solo uso, 300 s.
+    /// JSON `{ok,url}` o error.
+    async fn admin_url(&self, id: String, user: String) -> String {
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return err_json("proyecto no encontrado");
+        };
+        let docker = match DockerManager::connect() {
+            Ok(d) => d,
+            Err(e) => return err_json(&e.to_string()),
+        };
+        let user = user.trim();
+        let user_id = if user.is_empty() {
+            None
+        } else if let Ok(n) = user.parse::<u64>() {
+            Some(n)
+        } else {
+            // user_login → ID vía WP-CLI.
+            let args = vec![
+                "user".to_string(),
+                "get".to_string(),
+                user.to_string(),
+                "--field=ID".to_string(),
+            ];
+            match crate::wpcli::run(&docker, &site, &args).await {
+                Ok(out) => match out.trim().parse::<u64>() {
+                    Ok(n) => Some(n),
+                    Err(_) => return err_json(&format!("no existe el usuario «{user}»")),
+                },
+                Err(e) => return err_json(&format!("{e:#}")),
+            }
+        };
+        match crate::autologin::admin_url(&docker, &site, user_id, 300).await {
+            Ok(url) => serde_json::json!({ "ok": true, "url": url }).to_string(),
+            Err(e) => err_json(&format!("{e:#}")),
+        }
+    }
+
     /// Abre el frontend del proyecto en el navegador. JSON `{ok,url}` o error.
     async fn open_site(&self, id: String) -> String {
         let all = config::load_all_sites().unwrap_or_default();
@@ -412,6 +452,70 @@ impl Manager {
             .filter(|d| !d.is_empty())
             .collect();
         config::write_site_config(&site).is_ok()
+    }
+
+    // -- Cloudflare Quick Tunnel (los usa `wordpress-panel-cli tunnel`) -------
+
+    /// Enciende el túnel público del proyecto. `minutes` (10-180, string por
+    /// la misma razón que `set_upload_limit`) es el tiempo de exposición:
+    /// pasado ese tiempo se apaga solo. JSON `{ok:true}` o `{ok:false,error}`.
+    async fn enable_tunnel(&self, id: String, minutes: String) -> String {
+        let Ok(minutes) = minutes.trim().parse::<u32>() else {
+            return err_json("minutes debe ser un entero (10-180)");
+        };
+        let all = config::load_all_sites().unwrap_or_default();
+        let Some(site) = all.iter().find(|s| s.id == id).cloned() else {
+            return err_json("proyecto no encontrado");
+        };
+        let docker = match DockerManager::connect() {
+            Ok(d) => d,
+            Err(e) => return err_json(&e.to_string()),
+        };
+        if !docker.is_running(&site.container_name()).await {
+            return err_json(&format!("el proyecto '{}' no está encendido", site.name));
+        }
+        if let Err(e) = crate::wordpress::sync_mu_plugins(&site) {
+            return err_json(&format!("{e:#}"));
+        }
+        match docker.ensure_cloudflared(&site).await {
+            Ok(()) => {
+                crate::schedule_tunnel_timer(self.app.clone(), id.clone(), minutes);
+                crate::spawn_tunnel_hosts_setup(id);
+                serde_json::json!({ "ok": true }).to_string()
+            }
+            Err(e) => err_json(&format!("{e:#}")),
+        }
+    }
+
+    /// Apaga el túnel público del proyecto (su timer de auto-apagado y su
+    /// entrada en /etc/hosts, si tenía). true si no hubo error.
+    async fn disable_tunnel(&self, id: String) -> bool {
+        crate::cancel_tunnel_timer(&self.app, &id);
+        crate::domain::clear_tunnel_host(&id).ok();
+        let docker = match DockerManager::connect() {
+            Ok(d) => d,
+            Err(_) => return false,
+        };
+        docker.stop_cloudflared(&id).await.is_ok()
+    }
+
+    /// Estado del túnel. JSON `{running,url}` (`url` null hasta que Cloudflare la publique).
+    async fn tunnel_status(&self, id: String) -> String {
+        let docker = match DockerManager::connect() {
+            Ok(d) => d,
+            Err(e) => return err_json(&e.to_string()),
+        };
+        let running = docker.cloudflared_running(&id).await;
+        let url = if running {
+            docker
+                .cloudflared_log_tail(&id)
+                .await
+                .ok()
+                .and_then(|log| crate::cloudflare::extract_url(&log))
+        } else {
+            None
+        };
+        serde_json::json!({ "running": running, "url": url }).to_string()
     }
 
     /// Deploy directo de un repo registrado. JSON `{ok:true}` o `{ok:false,error}`.

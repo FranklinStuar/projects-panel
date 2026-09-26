@@ -201,6 +201,9 @@ pub struct SiteConfig {
     /// P. ej. `wp-content/updraft`, `wp-content/ai1wm-backups`.
     #[serde(default)]
     pub snapshot_excludes: Vec<String>,
+    /// Usuario WP (ID) con el que entra el auto-login. None = primer admin.
+    #[serde(default)]
+    pub autologin_user: Option<u64>,
 }
 
 impl SiteConfig {
@@ -596,6 +599,7 @@ mod tests {
             clone_of: None,
             worktree_of: None,
             snapshot_excludes: vec![],
+            autologin_user: None,
         }
     }
 

@@ -105,6 +105,31 @@ const TOOLS = [
     build: (a) => ({ argv: ['stop', a.project] }),
   },
   {
+    name: 'enable_tunnel',
+    description:
+      'Expone el proyecto a internet con un Cloudflare Quick Tunnel: URL pública temporal (*.trycloudflare.com), sin cuenta ni dominio propio. Requiere el proyecto encendido; usa tunnel_status para leer la URL una vez publicada. Se apaga solo pasado «minutes» (10-180, default 30) para no dejarlo expuesto por olvido.',
+    schema: {
+      project: S.project,
+      minutes: { type: 'integer', description: 'tiempo de exposición en minutos, 10-180 (default 30)' },
+    },
+    required: req('project'),
+    build: (a) => ({ argv: ['tunnel', 'enable', a.project, '--minutes', String(a.minutes || 30)] }),
+  },
+  {
+    name: 'disable_tunnel',
+    description: 'Apaga el túnel público del proyecto.',
+    schema: { project: S.project },
+    required: req('project'),
+    build: (a) => ({ argv: ['tunnel', 'disable', a.project] }),
+  },
+  {
+    name: 'tunnel_status',
+    description: 'Estado del túnel del proyecto: apagado, encendido (generando URL) o la URL pública ya publicada por Cloudflare.',
+    schema: { project: S.project },
+    required: req('project'),
+    build: (a) => ({ argv: ['tunnel', 'status', a.project] }),
+  },
+  {
     name: 'project_containers',
     description: 'Lista los containers de un proyecto (php, db, nginx, mailpit, minio) y su estado.',
     schema: { project: S.project },
@@ -149,6 +174,17 @@ const TOOLS = [
     },
     required: req('project', 'what'),
     build: (a) => ({ argv: ['open', a.what], needProject: true }),
+  },
+  {
+    name: 'admin_login_url',
+    description:
+      'Devuelve una URL de auto-login del proyecto para abrirla en CUALQUIER navegador (revisiones que exigen sesión iniciada). Token de un solo uso, válido 300 s: pide una nueva por cada carga. Sin «user» entra como el primer administrador.',
+    schema: {
+      project: S.project,
+      user: { type: 'string', description: 'ID numérico o user_login de WordPress (default: primer admin)' },
+    },
+    required: req('project'),
+    build: (a) => ({ argv: ['login-url', ...(a.user ? ['--user', String(a.user)] : [])], needProject: true }),
   },
   {
     name: 'list_snapshots',

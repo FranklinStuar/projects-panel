@@ -98,6 +98,7 @@ export interface SiteConfig {
   minio: boolean;
   migrationPending: boolean;
   lastMigratedAt: string | null;
+  autologinUser: number | null;
   cloneOf?: CloneInfo | null;
   /** Poblado si este sitio es un worktree-project. */
   worktreeOf?: WorktreeInfo | null;
@@ -256,4 +257,11 @@ export interface DumpLogEntry {
   bytes: number;
   /** `auto` | `stop` | `manual` */
   source: string;
+}
+
+/** Estado del Cloudflare Quick Tunnel de un proyecto (espejo de `TunnelStatus`). */
+export interface TunnelStatus {
+  running: boolean;
+  /** URL pública temporal (`https://algo.trycloudflare.com`), null hasta que Cloudflare la publique. */
+  url: string | null;
 }
