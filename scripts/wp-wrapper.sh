@@ -3,7 +3,12 @@
 # Detecta el proyecto por el directorio actual y ejecuta wp dentro de su container.
 set -e
 
-PROJECT_ID="$(wordpress-panel-cli detect-project "$PWD" 2>/dev/null || true)"
+# El helper se instala junto a este script; usarlo por ruta para no depender
+# de que ~/.local/bin esté en el PATH (en macOS no lo está por defecto).
+CLI="$(dirname "$0")/wordpress-panel-cli"
+[ -x "$CLI" ] || CLI="wordpress-panel-cli"
+
+PROJECT_ID="$("$CLI" detect-project "$PWD" 2>/dev/null || true)"
 
 if [ -z "$PROJECT_ID" ]; then
     echo "wp: no se detectó ningún proyecto Panel WP en $PWD" >&2
