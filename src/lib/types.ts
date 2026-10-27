@@ -155,6 +155,7 @@ export interface SystemStatus {
   mkcertOk: boolean;
   cliWrapperOk: boolean;
   plasmoidOk: boolean;
+  platform: string;
   endpoint: Endpoint;
   projectsRoot: string;
   configDir: string;

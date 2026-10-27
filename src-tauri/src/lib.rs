@@ -6,6 +6,7 @@ mod backup;
 mod cli;
 mod clone;
 mod config;
+#[cfg(target_os = "linux")]
 mod dbus;
 mod docker;
 mod domain;
@@ -988,11 +989,41 @@ async fn open_vscode(id: String) -> CmdResult<()> {
     github::open_vscode(&ws).map_err(e)
 }
 
+/// Una app lanzada desde Finder/Dock hereda el PATH mínimo de launchd
+/// (`/usr/bin:/bin:…`), sin Homebrew ni Docker Desktop: `docker`, `mkcert`,
+/// `gh`, `zstd` no se encontrarían. Se anteponen sus rutas habituales.
+#[cfg(target_os = "macos")]
+fn extend_macos_path() {
+    let mut extra: Vec<std::path::PathBuf> = [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/Applications/Docker.app/Contents/Resources/bin",
+    ]
+    .iter()
+    .map(std::path::PathBuf::from)
+    .collect();
+    if let Some(home) = dirs::home_dir() {
+        extra.push(home.join(".orbstack").join("bin"));
+    }
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut paths: Vec<_> = std::env::split_paths(&current).collect();
+    for p in extra.into_iter().rev() {
+        if p.exists() && !paths.contains(&p) {
+            paths.insert(0, p);
+        }
+    }
+    if let Ok(joined) = std::env::join_paths(paths) {
+        std::env::set_var("PATH", joined);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // NOTA: la posición de los botones de la barra de título (deben respetar la
     // config del usuario en KDE) queda pendiente — ver docs/KNOWN_ISSUES.md.
     // Se revisará al finalizar todas las fases.
+    #[cfg(target_os = "macos")]
+    extend_macos_path();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
@@ -1029,7 +1060,9 @@ pub fn run() {
 
             // Servidor D-Bus para el plasmoid KDE. Si la sesión D-Bus no está
             // disponible, el panel sigue funcionando igual (solo sin widget).
+            #[cfg(target_os = "linux")]
             let handle = app.handle().clone();
+            #[cfg(target_os = "linux")]
             tauri::async_runtime::spawn(async move {
                 match dbus::serve(handle).await {
                     Ok(conn) => {

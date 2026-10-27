@@ -63,6 +63,21 @@ pub fn install_cli_wrapper() -> Result<String> {
 /// usa el primero que exista. El proceso queda detached (no esperamos a que
 /// cierre). El wrapper `wp` ya instalado funciona dentro porque detecta el
 /// proyecto por el directorio actual.
+#[cfg(target_os = "macos")]
+pub fn open_terminal_at(path: &Path) -> Result<()> {
+    // `open -a Terminal <dir>` abre una ventana nueva con el cwd en `dir`.
+    let status = std::process::Command::new("open")
+        .args(["-a", "Terminal"])
+        .arg(path)
+        .status()
+        .map_err(|err| anyhow!("al lanzar Terminal: {err}"))?;
+    if !status.success() {
+        return Err(anyhow!("no se pudo abrir Terminal en {}", path.display()));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
 pub fn open_terminal_at(path: &Path) -> Result<()> {
     use std::process::Command;
 

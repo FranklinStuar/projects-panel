@@ -27,10 +27,6 @@ tokio = { version = "1", features = ["full"] }
 bollard = "0.18"
 futures-util = "0.3"
 
-# D-Bus (interfaz para el plasmoid KDE). Feature `tokio`: el executor de zbus
-# corre sobre el runtime Tokio del panel, no el suyo propio (async-io); si no,
-# los handlers que tocan Docker (bollard) panican ("no reactor running").
-zbus = { version = "5", default-features = false, features = ["tokio"] }
 
 # Serde
 serde = { version = "1", features = ["derive"] }
@@ -43,6 +39,13 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# D-Bus (interfaz para el plasmoid KDE y el CLI). Solo Linux: en macOS no hay
+# bus de sesión. Feature `tokio`: el executor de zbus corre sobre el runtime
+# Tokio del panel, no el suyo propio (async-io); si no, los handlers que tocan
+# Docker (bollard) panican ("no reactor running").
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5", default-features = false, features = ["tokio"] }
 
 [dev-dependencies]
 # Tests: directorios temporales para lógica de ficheros (rotate_dumps, import).

@@ -527,6 +527,20 @@ pub fn open_vscode(target: &std::path::Path) -> Result<()> {
             Err(err) => return Err(anyhow!("al lanzar {bin}: {err}")),
         }
     }
+    // macOS: el comando `code` solo existe si se instaló desde VSCode («Shell
+    // Command: Install 'code' command in PATH»); la app sí se abre con `open -a`.
+    #[cfg(target_os = "macos")]
+    for app in ["Visual Studio Code", "VSCodium", "Cursor"] {
+        let ok = StdCommand::new("open")
+            .args(["-a", app])
+            .arg(target)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            return Ok(());
+        }
+    }
     Err(anyhow!(
         "no se encontró VSCode (code, codium, code-insiders). Instálalo o ábrelo manualmente en {}",
         target.display()

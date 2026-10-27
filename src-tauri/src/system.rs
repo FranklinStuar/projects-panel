@@ -23,6 +23,9 @@ pub struct SystemStatus {
     pub mkcert_ok: bool,
     pub cli_wrapper_ok: bool,
     pub plasmoid_ok: bool,
+    /// `std::env::consts::OS` ("linux", "macos"): la UI oculta lo que no aplica
+    /// (plasmoid KDE fuera de Linux) y ajusta las instrucciones.
+    pub platform: String,
     pub endpoint: Endpoint,
     pub projects_root: String,
     pub config_dir: String,
@@ -45,6 +48,7 @@ pub async fn status() -> SystemStatus {
         mkcert_ok: mkcert_ca_installed(),
         cli_wrapper_ok: wrapper_installed(),
         plasmoid_ok: plasmoid_installed(),
+        platform: std::env::consts::OS.to_string(),
         endpoint: config::endpoint_or_default(),
         projects_root: config::projects_root()
             .map(|p| p.display().to_string())

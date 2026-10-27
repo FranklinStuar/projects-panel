@@ -42,8 +42,11 @@ pub struct DockerManager {
 
 impl DockerManager {
     pub fn connect() -> Result<Self> {
-        let docker = Docker::connect_with_local_defaults()
-            .context("no se pudo conectar al daemon de Docker")?;
+        let docker = match mac_socket() {
+            Some(sock) => Docker::connect_with_unix(&sock, 120, bollard::API_DEFAULT_VERSION),
+            None => Docker::connect_with_local_defaults(),
+        }
+        .context("no se pudo conectar al daemon de Docker")?;
         Ok(Self { docker })
     }
 
@@ -154,6 +157,9 @@ impl DockerManager {
         if self.is_running(&name).await {
             return Ok(name);
         }
+        // Crear un sitio llama a ensure_db sin pasar por start_site: la red
+        // debe existir antes de crear/arrancar cualquier container compartido.
+        self.ensure_network().await?;
 
         let image = db.db_type.image(&db.version);
         self.ensure_image(&image).await?;
@@ -307,6 +313,7 @@ impl DockerManager {
         if self.is_running(MAILPIT).await {
             return Ok(());
         }
+        self.ensure_network().await?;
         if self.exists(MAILPIT).await {
             self.docker
                 .start_container(MAILPIT, None::<StartContainerOptions<String>>)
@@ -354,6 +361,7 @@ impl DockerManager {
         if self.is_running(MINIO).await {
             return Ok(());
         }
+        self.ensure_network().await?;
         if self.exists(MINIO).await {
             self.docker
                 .start_container(MINIO, None::<StartContainerOptions<String>>)
@@ -422,6 +430,7 @@ impl DockerManager {
         if self.is_running(ADMINER).await {
             return Ok(());
         }
+        self.ensure_network().await?;
         if self.exists(ADMINER).await {
             self.docker
                 .start_container(ADMINER, None::<StartContainerOptions<String>>)
@@ -477,6 +486,7 @@ impl DockerManager {
         if self.is_running(NGINX).await {
             return Ok(());
         }
+        self.ensure_network().await?;
 
         let mut ep = Self::select_endpoint()?;
         Self::ensure_endpoint_dns(&ep)?;
@@ -1069,6 +1079,33 @@ pub fn db_data_dir(db: &DbService) -> Result<std::path::PathBuf> {
         .join(db_container_name(db));
     std::fs::create_dir_all(&dir).ok();
     Ok(dir)
+}
+
+/// macOS: si no hay `DOCKER_HOST` ni `/var/run/docker.sock` (Docker Desktop sin
+/// el socket por defecto), busca el socket por usuario de Docker Desktop,
+/// OrbStack o Colima. `None` → defaults de bollard (Linux o DOCKER_HOST).
+#[cfg(target_os = "macos")]
+fn mac_socket() -> Option<String> {
+    if std::env::var_os("DOCKER_HOST").is_some()
+        || std::path::Path::new("/var/run/docker.sock").exists()
+    {
+        return None;
+    }
+    let home = dirs::home_dir()?;
+    [
+        ".docker/run/docker.sock",
+        ".orbstack/run/docker.sock",
+        ".colima/default/docker.sock",
+    ]
+    .iter()
+    .map(|rel| home.join(rel))
+    .find(|p| p.exists())
+    .map(|p| p.display().to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn mac_socket() -> Option<String> {
+    None
 }
 
 /// uid/gid del usuario host, para mapear www-data dentro del container.

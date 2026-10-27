@@ -7,6 +7,9 @@
 //! La instalación con permisos (copiar a `/etc/NetworkManager/dnsmasq.d/`) es un
 //! paso de "primera configuración"; aquí se genera el snippet y se comprueba si
 //! el sistema ya resuelve.
+//!
+//! macOS: dnsmasq de Homebrew (`$(brew --prefix)/etc/dnsmasq.d/`) + el resolver
+//! por dominio `/etc/resolver/test` → `nameserver 127.0.0.1` (ver first-run.sh).
 
 use anyhow::{anyhow, Result};
 use std::net::ToSocketAddrs;
@@ -26,9 +29,19 @@ pub fn snippet_path() -> Result<PathBuf> {
 }
 
 /// Destino recomendado en Manjaro/NetworkManager (requiere root al copiar).
-#[allow(dead_code)] // usado por la pantalla de primera configuración (Fase 4)
+#[cfg(not(target_os = "macos"))]
 pub fn install_target() -> &'static str {
     "/etc/NetworkManager/dnsmasq.d/wordpress-panel.conf"
+}
+
+/// Prefijo de Homebrew (Apple Silicon o Intel).
+#[cfg(target_os = "macos")]
+pub fn brew_prefix() -> &'static str {
+    if std::path::Path::new("/opt/homebrew").exists() {
+        "/opt/homebrew"
+    } else {
+        "/usr/local"
+    }
 }
 
 /// ¿El sistema ya resuelve los `.test` a loopback?
@@ -59,6 +72,7 @@ pub fn ensure_wildcard() -> Result<()> {
 
 /// Instala/reescribe la regla wildcard apuntando a `ip` y recarga NetworkManager.
 /// Requiere privilegios → usa `pkexec` (diálogo gráfico). Idempotente.
+#[cfg(not(target_os = "macos"))]
 pub fn install_wildcard(ip: &str) -> Result<()> {
     let target = install_target();
     let rule = wildcard_rule(ip);
@@ -77,6 +91,32 @@ pub fn install_wildcard(ip: &str) -> Result<()> {
     if !status.success() {
         return Err(anyhow!(
             "pkexec no pudo instalar la regla dnsmasq para {ip}"
+        ));
+    }
+    Ok(())
+}
+
+/// macOS: reescribe el snippet en el dnsmasq de Homebrew (dir del usuario, sin
+/// root) y reinicia el servicio, que sí corre como root (puerto 53) → diálogo
+/// de administrador vía `osascript`. Idempotente.
+#[cfg(target_os = "macos")]
+pub fn install_wildcard(ip: &str) -> Result<()> {
+    let prefix = brew_prefix();
+    let dir = std::path::Path::new(prefix).join("etc").join("dnsmasq.d");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(dir.join("wordpress-panel.conf"), wildcard_rule(ip))?;
+    // `prefix` es una ruta fija conocida: sin comillas ni metacaracteres.
+    let script = format!(
+        "do shell script \"{prefix}/bin/brew services restart dnsmasq\" with administrator privileges"
+    );
+    let status = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .status()
+        .map_err(|err| anyhow!("no se pudo ejecutar osascript: {err}"))?;
+    if !status.success() {
+        return Err(anyhow!(
+            "no se pudo reiniciar dnsmasq (brew services) para apuntar *.test a {ip}"
         ));
     }
     Ok(())

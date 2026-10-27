@@ -36,6 +36,7 @@ impl DbType {
         }
     }
 
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))] // solo dbus.rs
     pub fn port(&self) -> u16 {
         match self {
             DbType::Mysql | DbType::Mariadb => 3306,
@@ -365,11 +366,27 @@ pub struct SiteState {
 
 /// `~/.config/wordpress-panel/`
 pub fn config_dir() -> Result<PathBuf> {
-    let dir = dirs::config_dir()
+    let dir = base_config_dir()
         .context("no se pudo determinar el directorio de configuración")?
         .join("wordpress-panel");
     std::fs::create_dir_all(&dir).ok();
     Ok(dir)
+}
+
+/// En macOS `dirs::config_dir()` es `~/Library/Application Support` (con
+/// espacio: incómodo en binds de Docker y scripts). Usamos `~/.config` también
+/// ahí, respetando `XDG_CONFIG_HOME` si está definido (tests de integración).
+#[cfg(target_os = "macos")]
+fn base_config_dir() -> Option<PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn base_config_dir() -> Option<PathBuf> {
+    dirs::config_dir()
 }
 
 /// Raíz de proyectos: `~/panel-wp/`

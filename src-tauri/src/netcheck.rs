@@ -9,6 +9,9 @@
 //! CUALQUIER `127.0.0.x:80`. Por eso distinguimos tres estados por puerto:
 //! libre, wildcard, o atado a IPs concretas. Solo en el caso "IPs concretas"
 //! sirve la treta de usar otra IP loopback manteniendo el puerto 80.
+//!
+//! macOS no tiene `/proc`: allí se usa `lsof` (ver `mod mac`), con un `bind` de
+//! prueba como respaldo para listeners de otros usuarios (root) que `lsof` no ve.
 
 use std::net::Ipv4Addr;
 
@@ -40,6 +43,7 @@ impl PortStatus {
     }
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 /// Decodifica el `local_address` IPv4 hex de `/proc/net/tcp` (`0100007F` = 127.0.0.1).
 fn parse_v4(hex: &str) -> Option<Ipv4Addr> {
     let raw = u32::from_str_radix(hex, 16).ok()?;
@@ -47,6 +51,7 @@ fn parse_v4(hex: &str) -> Option<Ipv4Addr> {
     Some(Ipv4Addr::new(b[0], b[1], b[2], b[3]))
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 /// `local_address` = `ADDR:PORT` en hex. Devuelve `(addr_hex, port)` si LISTEN
 /// y el puerto coincide.
 fn listen_addr<'a>(line: &'a str, port: u16) -> Option<&'a str> {
@@ -59,6 +64,7 @@ fn listen_addr<'a>(line: &'a str, port: u16) -> Option<&'a str> {
     (p == port).then_some(addr_hex)
 }
 
+#[cfg(not(target_os = "macos"))]
 fn scan_v4(path: &str, port: u16, wildcard: &mut bool, specifics: &mut Vec<Ipv4Addr>) {
     let Ok(content) = std::fs::read_to_string(path) else {
         return;
@@ -78,6 +84,7 @@ fn scan_v4(path: &str, port: u16, wildcard: &mut bool, specifics: &mut Vec<Ipv4A
 /// En IPv6 solo nos interesa detectar el wildcard `::` (todo ceros), que en la
 /// práctica (sin IPV6_V6ONLY) también cubre IPv4. Listeners en `::1` no chocan
 /// con nuestros binds IPv4.
+#[cfg(not(target_os = "macos"))]
 fn scan_v6(path: &str, port: u16, wildcard: &mut bool) {
     let Ok(content) = std::fs::read_to_string(path) else {
         return;
@@ -93,6 +100,13 @@ fn scan_v6(path: &str, port: u16, wildcard: &mut bool) {
 }
 
 /// Estado del puerto en el host, combinando IPv4 + IPv6.
+#[cfg(target_os = "macos")]
+pub fn port_status(port: u16) -> PortStatus {
+    mac::port_status(port)
+}
+
+/// Estado del puerto en el host, combinando IPv4 + IPv6.
+#[cfg(not(target_os = "macos"))]
 pub fn port_status(port: u16) -> PortStatus {
     let mut wildcard = false;
     let mut specifics: Vec<Ipv4Addr> = Vec::new();
@@ -134,6 +148,12 @@ pub fn pick_alt_port(start: u16) -> Option<u16> {
 /// Mejor esfuerzo: nombre del proceso que escucha en `port` (para mensajes de
 /// error legibles). Requiere poder leer `/proc/<pid>/fd` (mismo usuario). Si no
 /// se puede determinar, devuelve `None` y el llamador usa solo IP:puerto.
+#[cfg(target_os = "macos")]
+pub fn holder_name(port: u16) -> Option<String> {
+    mac::holder_name(port)
+}
+
+#[cfg(not(target_os = "macos"))]
 pub fn holder_name(port: u16) -> Option<String> {
     let inodes = listen_inodes(port);
     if inodes.is_empty() {
@@ -196,6 +216,7 @@ mod tests {
 }
 
 /// Inodos (col 9 de `/proc/net/tcp{,6}`) de los sockets en LISTEN en `port`.
+#[cfg(not(target_os = "macos"))]
 fn listen_inodes(port: u16) -> Vec<String> {
     let mut out = Vec::new();
     for path in ["/proc/net/tcp", "/proc/net/tcp6"] {
@@ -212,4 +233,83 @@ fn listen_inodes(port: u16) -> Vec<String> {
         }
     }
     out
+}
+
+/// Implementación macOS vía `lsof -F` (salida por campos: `p<pid>`, `c<cmd>`,
+/// `n<addr:port>`). `lsof` sin root solo ve los sockets del usuario; por eso, si
+/// no ve nada, se confirma con un `bind` de prueba en `127.0.0.1:port`.
+#[cfg(target_os = "macos")]
+mod mac {
+    use super::PortStatus;
+    use std::net::{Ipv4Addr, TcpListener};
+
+    fn lsof(port: u16) -> String {
+        std::process::Command::new("lsof")
+            .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fcn"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default()
+    }
+
+    /// `n*:80` / `n[::]:80` = wildcard; `n127.0.0.1:80` = IP concreta;
+    /// `n[::1]:80` (loopback v6) no choca con binds IPv4.
+    pub(super) fn parse(out: &str, port: u16) -> (bool, Vec<Ipv4Addr>) {
+        let suffix = format!(":{port}");
+        let mut wildcard = false;
+        let mut specifics = Vec::new();
+        for line in out.lines() {
+            let Some(addr) = line.strip_prefix('n').and_then(|a| a.strip_suffix(&suffix)) else {
+                continue;
+            };
+            match addr {
+                "*" | "[::]" | "0.0.0.0" => wildcard = true,
+                a => {
+                    if let Ok(ip) = a.parse::<Ipv4Addr>() {
+                        specifics.push(ip);
+                    }
+                }
+            }
+        }
+        (wildcard, specifics)
+    }
+
+    pub fn port_status(port: u16) -> PortStatus {
+        let (wildcard, mut specifics) = parse(&lsof(port), port);
+        if wildcard {
+            return PortStatus::Wildcard;
+        }
+        if specifics.is_empty() {
+            // Listener invisible para lsof (otro usuario): el bind lo delata.
+            // Sin saber en qué IP escucha, se trata como wildcard (conservador).
+            return match TcpListener::bind((Ipv4Addr::LOCALHOST, port)) {
+                Ok(_) => PortStatus::Free,
+                Err(err) if err.kind() == std::io::ErrorKind::AddrInUse => PortStatus::Wildcard,
+                Err(_) => PortStatus::Free,
+            };
+        }
+        specifics.sort();
+        specifics.dedup();
+        PortStatus::Specific(specifics)
+    }
+
+    pub fn holder_name(port: u16) -> Option<String> {
+        lsof(port)
+            .lines()
+            .find_map(|l| l.strip_prefix('c').map(str::to_string))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn parse_lsof_fields() {
+            let out = "p10\ncnginx\nf5\nn127.0.0.1:80\nf6\nn[::1]:80\n";
+            assert_eq!(parse(out, 80), (false, vec![Ipv4Addr::LOCALHOST]));
+            assert_eq!(parse("p1\ncx\nn*:80\n", 80), (true, vec![]));
+            assert_eq!(parse("p1\ncx\nn[::]:443\n", 443), (true, vec![]));
+            // otro puerto que termina igual no cuenta (8080 ≠ 80).
+            assert_eq!(parse("p1\ncx\nn*:8080\n", 80), (false, vec![]));
+        }
+    }
 }

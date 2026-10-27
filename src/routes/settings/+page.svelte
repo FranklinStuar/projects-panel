@@ -56,6 +56,8 @@
   );
 
   const FIRST_RUN = 'bash scripts/first-run.sh';
+  // El plasmoid (y su D-Bus) es exclusivo de KDE/Linux.
+  let isLinux = $derived(status?.platform === 'linux');
 
   onMount(load);
 </script>
@@ -63,7 +65,7 @@
 <h1 class="mb-1 text-lg font-semibold">Configuración</h1>
 <p class="mb-4 text-sm text-zinc-500">
   Estado del sistema y primera configuración. Las acciones que requieren privilegios
-  (dnsmasq, CA de mkcert, plasmoid) se ejecutan con
+  (dnsmasq, CA de mkcert{isLinux ? ', plasmoid' : ''}) se ejecutan con
   <code class="rounded bg-zinc-800 px-1">{FIRST_RUN}</code>.
 </p>
 
@@ -113,7 +115,7 @@
         </div>
       </div>
 
-      <div class="flex items-center justify-between border-b border-zinc-800/60 px-4 py-3">
+      <div class="flex items-center justify-between border-zinc-800/60 px-4 py-3" class:border-b={isLinux}>
         <div class="flex items-center gap-3">
           <span class="inline-block h-2.5 w-2.5 rounded-full" class:bg-green-500={status.cliWrapperOk} class:bg-red-500={!status.cliWrapperOk}></span>
           <div><div class="font-medium">Wrappers WP-CLI</div><div class="text-xs text-zinc-500">wp / wordpress-panel-cli en ~/.local/bin</div></div>
@@ -122,12 +124,14 @@
           onclick={() => run(() => api.installCliWrapper())}>{status.cliWrapperOk ? 'Reinstalar' : 'Instalar'}</button>
       </div>
 
-      <div class="flex items-center justify-between px-4 py-3">
-        <div class="flex items-center gap-3">
-          <span class="inline-block h-2.5 w-2.5 rounded-full" class:bg-green-500={status.plasmoidOk} class:bg-red-500={!status.plasmoidOk}></span>
-          <div><div class="font-medium">Plasmoid KDE</div><div class="text-xs text-zinc-500">Widget del panel ({FIRST_RUN})</div></div>
+      {#if isLinux}
+        <div class="flex items-center justify-between px-4 py-3">
+          <div class="flex items-center gap-3">
+            <span class="inline-block h-2.5 w-2.5 rounded-full" class:bg-green-500={status.plasmoidOk} class:bg-red-500={!status.plasmoidOk}></span>
+            <div><div class="font-medium">Plasmoid KDE</div><div class="text-xs text-zinc-500">Widget del panel ({FIRST_RUN})</div></div>
+          </div>
         </div>
-      </div>
+      {/if}
     </div>
   </section>
 

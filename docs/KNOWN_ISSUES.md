@@ -44,3 +44,11 @@ entre máquinas sin hardcodear el lado.
   - Revisar versión de webkit2gtk/tao y issues upstream de Tauri sobre CSD en KDE.
 
 **Estado:** diferido por decisión del usuario hasta cerrar todas las fases.
+
+## macOS: subcomandos del CLI que usan D-Bus
+
+En macOS no hay bus de sesión, así que el servidor D-Bus (`dbus.rs`) no se
+compila. `wp` y `wordpress-panel-cli detect-project`/`open folder` funcionan;
+los subcomandos que hablan con el panel en ejecución (`snapshot`, `git`,
+`worktree`, `open admin|site`, …) y el servidor MCP fallan con un mensaje
+claro. Portarlos requiere otro IPC (p. ej. un socket Unix en `config_dir`).

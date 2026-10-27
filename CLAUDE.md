@@ -43,6 +43,12 @@ pnpm test:e2e                            # e2e GUI con Playwright (arranca dev:m
 
 En Wayland, si la ventana sale en blanco: `WEBKIT_DISABLE_DMABUF_RENDERER=1 pnpm tauri dev`.
 
+**macOS**: requiere Homebrew, Rust (`brew install rustup && rustup default stable`;
+rustup es keg-only → `export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`) y Docker
+Desktop/OrbStack/Colima. `first-run.sh` instala dnsmasq/mkcert/nss/jq/zstd y crea
+`/etc/resolver/test`. Lo específico de plataforma va tras `#[cfg(target_os = …)]`
+(D-Bus/plasmoid solo Linux); ver "Soporte macOS" en `docs/CHANGELOG.md`.
+
 ## Estructura (resumen)
 
 ```

@@ -712,3 +712,24 @@ Ver `PLAN.md`: Fase 5 IA (`agent.rs`).
 
 - **Botones de la barra de título** no respetan la config de KDE — ver
   `docs/KNOWN_ISSUES.md`. Se revisará al finalizar todas las fases.
+
+## Soporte macOS
+
+El panel compila y corre en macOS (Apple Silicon/Intel) además de Linux.
+- **Docker**: `DockerManager::connect` busca el socket por usuario de Docker
+  Desktop / OrbStack / Colima si no hay `DOCKER_HOST` ni `/var/run/docker.sock`.
+- **DNS `*.test`**: dnsmasq de Homebrew (`$(brew --prefix)/etc/dnsmasq.d/`) +
+  `/etc/resolver/test`. `first-run.sh` lo configura (rama macOS);
+  `domain::install_wildcard` reinicia dnsmasq vía `osascript` (admin).
+- **Puertos** (`netcheck.rs`): sin `/proc`; usa `lsof -F` + `bind` de prueba.
+- **Rutas**: `config_dir` = `~/.config/wordpress-panel` también en macOS (no
+  `~/Library/Application Support`, con espacio).
+- **D-Bus/plasmoid**: solo Linux (`zbus` es dependencia `cfg(linux)`, `mod dbus`
+  gateado). `SystemStatus.platform` permite a la UI ocultar el plasmoid.
+- **Apps externas**: terminal = `open -a Terminal`; VSCode cae a `open -a`.
+  El PATH se amplía al arrancar (Homebrew, Docker Desktop) para lanzamientos
+  desde Finder.
+- Icono `icon.icns` para el bundle `.app`/`.dmg`.
+- Fix: `ensure_db`/`ensure_nginx`/mailpit/minio/adminer crean `panel-net` si
+  falta (crear un sitio llamaba a `ensure_db` sin red → 404 de Docker en una
+  instalación sin `first-run.sh`).

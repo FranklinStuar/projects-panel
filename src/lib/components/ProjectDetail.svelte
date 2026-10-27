@@ -975,7 +975,7 @@
       <p class="text-sm text-zinc-500">Comprobando gh…</p>
     {:else if !gh.installed}
       <p class="text-sm text-amber-500">
-        `gh` no está instalado. Instálalo con <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">sudo pacman -S github-cli</code> para clonar desde GitHub.
+        `gh` no está instalado. Instálalo con <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">sudo pacman -S github-cli</code> (Arch) o <code class="rounded bg-zinc-200 px-1 dark:bg-zinc-800">brew install gh</code> (macOS) para clonar desde GitHub.
       </p>
     {:else if !gh.authenticated}
       <p class="text-sm text-amber-500">

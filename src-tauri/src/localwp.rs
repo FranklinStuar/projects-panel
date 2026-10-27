@@ -82,7 +82,7 @@ pub struct ImportResult {
     pub note: Option<String>,
 }
 
-/// `~/.config/Local/sites.json`.
+/// `~/.config/Local/sites.json` (macOS: `~/Library/Application Support/Local/sites.json`).
 fn sites_json() -> Result<PathBuf> {
     Ok(dirs::config_dir()
         .context("no se pudo determinar el directorio de configuración")?

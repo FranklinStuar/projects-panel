@@ -50,6 +50,7 @@ export const systemStatus: SystemStatus = {
   mkcertOk: true,
   cliWrapperOk: false, // ✗ para ver el botón "Instalar"
   plasmoidOk: false, // ✗
+  platform: 'linux',
   endpoint,
   projectsRoot: '/home/u/panel-wp',
   configDir: '/home/u/.config/wordpress-panel'

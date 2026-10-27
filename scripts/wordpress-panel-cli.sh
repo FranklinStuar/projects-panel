@@ -77,7 +77,11 @@ require_panel() {
     elif command -v qdbus6 >/dev/null 2>&1; then
         qdbus6 "$DBUS_DEST" "$DBUS_PATH" "$DBUS_IFACE.GetRunningSites" >/dev/null 2>&1 && return 0
     fi
-    echo "error: el panel WordPress no está en ejecución (ábrelo para usar el panel)" >&2
+    if [ "$(uname -s)" = "Darwin" ]; then
+        echo "error: este comando habla con el panel por D-Bus y aún no está disponible en macOS (usa la GUI; \`wp\` y \`detect-project\` sí funcionan)" >&2
+    else
+        echo "error: el panel WordPress no está en ejecución (ábrelo para usar el panel)" >&2
+    fi
     exit 4
 }
 
@@ -411,7 +415,7 @@ open)
         fi
         ;;
     folder)
-        xdg-open "$ppath" >/dev/null 2>&1 &
+        if [ "$(uname -s)" = "Darwin" ]; then open "$ppath"; else xdg-open "$ppath" >/dev/null 2>&1 & fi
         echo "ok: abierto $ppath"
         ;;
     *)

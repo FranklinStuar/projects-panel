@@ -14,6 +14,7 @@ fn ssl_dir(site: &SiteConfig) -> PathBuf {
     Path::new(&site.path).join("ssl")
 }
 
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))] // solo dbus.rs
 pub fn has_cert(site: &SiteConfig) -> bool {
     let dir = ssl_dir(site);
     dir.join("cert.pem").exists() && dir.join("key.pem").exists()
