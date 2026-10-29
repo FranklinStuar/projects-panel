@@ -44,8 +44,25 @@ use wordpress::{NewSiteRequest, WpVersion};
 type CmdResult<T> = Result<T, String>;
 
 fn e<E: std::fmt::Display>(err: E) -> String {
-    err.to_string()
+    let msg = err.to_string();
+    if docker_unreachable(&msg) {
+        return DOCKER_DOWN_MSG.to_string();
+    }
+    msg
 }
+
+/// bollard conecta en diferido: si el daemon está apagado, el error llega en la
+/// primera petición como un fallo de conexión de hyper, ilegible para el usuario.
+fn docker_unreachable(msg: &str) -> bool {
+    msg.contains("hyper legacy client") && msg.contains("Connect")
+}
+
+#[cfg(target_os = "macos")]
+const DOCKER_DOWN_MSG: &str =
+    "Docker no está corriendo. Abre Docker Desktop (u OrbStack/Colima) y vuelve a intentarlo.";
+#[cfg(not(target_os = "macos"))]
+const DOCKER_DOWN_MSG: &str =
+    "Docker no está corriendo. Inícialo (`sudo systemctl start docker`) y vuelve a intentarlo.";
 
 /// Tareas de streaming de logs activas, por id de proyecto.
 #[derive(Default)]
