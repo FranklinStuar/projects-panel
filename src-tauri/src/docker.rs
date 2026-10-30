@@ -503,6 +503,18 @@ impl DockerManager {
             if wt_binds.iter().all(|b| current.contains(b)) {
                 return Ok(());
             }
+            // Quitarlo ANTES del preflight: vivo retiene sus puertos y el preflight
+            // los daría por ocupados → reasignaría el endpoint (rompe URLs).
+            self.docker
+                .remove_container(
+                    NGINX,
+                    Some(RemoveContainerOptions {
+                        force: true,
+                        ..Default::default()
+                    }),
+                )
+                .await
+                .ok();
         }
         self.ensure_network().await?;
 
