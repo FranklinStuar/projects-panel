@@ -33,6 +33,8 @@ let disconnectedSites = initialDisconnectedSites();
 // y desaparecen al quedar sin proyectos; aquí solo se acumulan los creados a
 // mano (botón «+») o asignados por drag&drop (set_site_group).
 let groups: string[] = [];
+// Carpeta de worktrees de Configuración (null = `{proyecto}/wt`, por defecto).
+let worktreesDir: string | null = null;
 const status = { ...systemStatus };
 
 function find(id: string): SiteState | undefined {
@@ -228,6 +230,11 @@ export function installMockIpc() {
         return 'Wrappers instalados en ~/.local/bin';
       case 'reset_endpoint':
         return null;
+      case 'get_worktrees_dir':
+        return worktreesDir;
+      case 'set_worktrees_dir':
+        worktreesDir = ((args.dir as string | null) ?? '').trim() || null;
+        return worktreesDir;
       case 'export_db':
         return '/home/u/panel-wp/demo/app/sql/db-2026.sql';
       case 'dump_log':

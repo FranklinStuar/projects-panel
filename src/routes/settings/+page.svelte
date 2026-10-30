@@ -9,10 +9,16 @@
   let msg = $state<string | null>(null);
   let err = $state<string | null>(null);
 
+  // Carpeta base de los checkouts de worktrees (null = `{proyecto}/wt`).
+  let worktreesDir = $state<string | null>(null);
+  let worktreesInput = $state('');
+
   async function load() {
     try {
       err = null;
       status = await api.systemStatus();
+      worktreesDir = await api.getWorktreesDir();
+      worktreesInput = worktreesDir ?? '';
     } catch (e) {
       err = String(e);
     } finally {
@@ -164,9 +170,43 @@
         <span class="text-zinc-500">Proyectos</span>
         <code class="text-xs">{status.projectsRoot}</code>
       </div>
-      <div class="flex items-center justify-between px-4 py-3">
+      <div class="flex items-center justify-between border-b border-zinc-800/60 px-4 py-3">
         <span class="text-zinc-500">Configuración</span>
         <code class="text-xs">{status.configDir}</code>
+      </div>
+      <div class="px-4 py-3">
+        <div class="mb-2 flex items-center justify-between">
+          <span class="text-zinc-500">Worktrees</span>
+          <code class="text-xs">{worktreesDir ?? `${status.projectsRoot}/{proyecto}/wt`}</code>
+        </div>
+        <div class="flex gap-2">
+          <input
+            class="min-w-0 flex-1 rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5 font-mono text-xs"
+            placeholder="Por defecto: dentro de cada worktree-project (wt/)"
+            bind:value={worktreesInput}
+          />
+          <button
+            class="shrink-0 rounded bg-zinc-800 px-3 py-1.5 disabled:opacity-50"
+            disabled={busy || worktreesInput.trim() === (worktreesDir ?? '')}
+            onclick={() => run(() => api.setWorktreesDir(worktreesInput), 'Carpeta de worktrees guardada')}
+          >
+            Guardar
+          </button>
+          {#if worktreesDir}
+            <button
+              class="shrink-0 rounded bg-zinc-800 px-3 py-1.5 disabled:opacity-50"
+              disabled={busy}
+              onclick={() => run(() => api.setWorktreesDir(null), 'Carpeta de worktrees restablecida')}
+            >
+              Por defecto
+            </button>
+          {/if}
+        </div>
+        <p class="mt-2 text-xs text-zinc-500">
+          Dónde se crea el <code>git worktree</code> de cada worktree-project nuevo (ruta absoluta;
+          se acepta <code>~/</code>). Los ya creados conservan su ubicación. En macOS la carpeta debe
+          estar compartida con Docker (el home lo está por defecto).
+        </p>
       </div>
     </div>
     <p class="mt-2 text-xs text-zinc-500">Tema: navy oscuro (sin selector claro/oscuro).</p>

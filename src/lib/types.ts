@@ -80,6 +80,8 @@ export interface WorktreeInfo {
   /** true = comparte la DB del padre; false = copia propia. */
   sharedDb: boolean;
   createdAt: string;
+  /** Carpeta base del checkout (Configuración); ausente = `{path}/wt/`. */
+  worktreesDir?: string | null;
 }
 
 export interface SiteConfig {

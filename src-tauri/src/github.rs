@@ -567,7 +567,14 @@ pub async fn ensure_workspace(site: &SiteConfig) -> Result<std::path::PathBuf> {
             let basename = crate::config::path_basename(&wt.target_path);
             let folders = vec![serde_json::json!({
                 "name": format!("{basename} · {}", wt.branch),
-                "path": std::path::Path::new("wt").join(basename).to_string_lossy(),
+                // Relativa si es la de por defecto (`wt/`), absoluta si es externa.
+                "path": site
+                    .worktree_root()
+                    .join(basename)
+                    .strip_prefix(&site.path)
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|_| site.worktree_root().join(basename))
+                    .to_string_lossy(),
             })];
             let doc = serde_json::json!({ "folders": folders, "settings": {} });
             std::fs::write(&ws, serde_json::to_string_pretty(&doc)?)

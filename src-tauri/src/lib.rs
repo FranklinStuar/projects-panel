@@ -167,6 +167,25 @@ fn reset_endpoint() -> CmdResult<()> {
     config::clear_endpoint().map_err(e)
 }
 
+/// Carpeta base de los checkouts de worktrees nuevos (`None` = `{proyecto}/wt`).
+#[tauri::command]
+fn get_worktrees_dir() -> CmdResult<Option<String>> {
+    config::load_worktrees_dir().map_err(e)
+}
+
+/// Fija (o con `None`/vacío, restablece) la carpeta de worktrees. Si `panel-nginx`
+/// corre, lo recrea con el montaje nuevo (`ensure_nginx` detecta el que falta).
+#[tauri::command]
+async fn set_worktrees_dir(dir: Option<String>) -> CmdResult<Option<String>> {
+    let saved = config::save_worktrees_dir(dir.as_deref()).map_err(e)?;
+    if let Ok(docker) = DockerManager::connect() {
+        if docker.is_running("panel-nginx").await {
+            docker.ensure_nginx().await.map_err(e)?;
+        }
+    }
+    Ok(saved)
+}
+
 /// Migra un proyecto pendiente al sistema actual (crea DB, importa dump, SSL) y
 /// lo enciende. Devuelve la config actualizada + un aviso opcional.
 #[tauri::command]
@@ -1103,6 +1122,8 @@ pub fn run() {
             system_status,
             create_panel_network,
             reset_endpoint,
+            get_worktrees_dir,
+            set_worktrees_dir,
             migrate_site,
             delete_site,
             list_localwp_sites,

@@ -46,6 +46,19 @@ pub(crate) fn project_dirname(site: &SiteConfig) -> String {
         .to_string()
 }
 
+/// Punto de montaje en `panel-nginx` de una carpeta base de worktrees externa
+/// (`config::worktree_bases`): `/srv/worktrees/{fnv1a(base)}`. Hash propio (no
+/// `DefaultHasher`) para que sea estable entre builds: el montaje del container
+/// sobrevive a actualizaciones del panel.
+pub fn worktrees_mount(base: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in base.as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("/srv/worktrees/{h:016x}")
+}
+
 pub fn render_vhost(site: &SiteConfig) -> String {
     let server_name = &site.domain;
     let upstream = format!("{}:9000", site.container_name());
@@ -60,10 +73,14 @@ pub fn render_vhost(site: &SiteConfig) -> String {
         let parent = &wt.parent_dirname;
         let target = wt.target_path.trim_matches('/');
         let basename = crate::config::path_basename(target);
+        let wt_root = match &wt.worktrees_dir {
+            Some(base) => format!("{}/{dirname}", worktrees_mount(base)),
+            None => format!("/srv/projects/{dirname}/wt"),
+        };
         let block = format!(
             r#"
     location ~ ^/{target}/(.+\.(?:css|js|mjs|png|jpe?g|gif|svg|ico|webp|woff2?|ttf|eot|map|json))$ {{
-        alias /srv/projects/{dirname}/wt/{basename}/$1;
+        alias {wt_root}/{basename}/$1;
         expires 7d;
         access_log off;
     }}
@@ -265,6 +282,7 @@ mod tests {
             branch: "feat/x".into(),
             shared_db: true,
             created_at: "2026-01-01T00:00:00Z".into(),
+            worktrees_dir: None,
         });
         let conf = render_vhost(&site);
         // root = padre; alias del objetivo = worktree del propio proyecto.
@@ -276,6 +294,35 @@ mod tests {
         assert!(
             conf.contains("^/wp-content/themes/mi-theme/"),
             "el location del objetivo debe usar la ruta del repo:\n{conf}"
+        );
+    }
+
+    #[test]
+    fn vhost_worktree_en_carpeta_externa() {
+        use crate::config::WorktreeInfo;
+        let mut site = base_site(false);
+        site.path = "/home/u/panel-wp/demo-feat".into();
+        site.domain = "demo-feat.test".into();
+        site.worktree_of = Some(WorktreeInfo {
+            parent_id: "parent1".into(),
+            parent_dirname: "demo".into(),
+            target_path: "wp-content/plugins/mi-plugin".into(),
+            branch: "feat/x".into(),
+            shared_db: true,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            worktrees_dir: Some("/data/worktrees".into()),
+        });
+        let mount = worktrees_mount("/data/worktrees");
+        assert_eq!(mount, worktrees_mount("/data/worktrees"), "hash estable");
+        assert_ne!(mount, worktrees_mount("/data/otros"));
+        let conf = render_vhost(&site);
+        assert!(
+            conf.contains(&format!("alias {mount}/demo-feat/mi-plugin/$1")),
+            "alias debe apuntar al montaje de la carpeta externa:\n{conf}"
+        );
+        assert_eq!(
+            site.worktree_root(),
+            std::path::Path::new("/data/worktrees/demo-feat"),
         );
     }
 }

@@ -157,6 +157,7 @@ async fn run_create<R: tauri::Runtime>(
             branch: branch.to_string(),
             shared_db,
             created_at: Utc::now().to_rfc3339(),
+            worktrees_dir: config::load_worktrees_dir()?,
         }),
         snapshot_excludes: vec![],
     };
@@ -264,6 +265,7 @@ async fn run_create<R: tauri::Runtime>(
         log(app, "  Limpiando el worktree a medio crear…".to_string());
         docker.remove_container(&site.container_name()).await.ok();
         crate::nginx::remove_vhost(&site).ok();
+        remove_external_root(&site);
         std::fs::remove_dir_all(&site.path).ok();
         return Err(err);
     }
@@ -323,11 +325,21 @@ pub async fn remove_worktree<R: tauri::Runtime>(
 
     // Borrar la carpeta del worktree: no queda rastro del proyecto de prueba.
     log(app, "Borrando la carpeta del worktree…");
+    remove_external_root(&site);
     std::fs::remove_dir_all(&site.path)
         .with_context(|| format!("borrando {}", site.path))?;
 
     log(app, "✓ Worktree eliminado. La rama sigue en el proyecto principal.");
     Ok(())
+}
+
+/// Si el checkout vive en la carpeta de worktrees externa (`{base}/{slug}`), la
+/// borra; la de por defecto (`{path}/wt`) cae con la carpeta del proyecto.
+fn remove_external_root(site: &SiteConfig) {
+    let root = site.worktree_root();
+    if !root.starts_with(&site.path) {
+        std::fs::remove_dir_all(&root).ok();
+    }
 }
 
 /// Worktrees de un proyecto padre (sitios con `worktree_of.parent_id == parent_id`).

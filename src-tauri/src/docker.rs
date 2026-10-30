@@ -483,8 +483,26 @@ impl DockerManager {
     /// Antes de bindear elige un *endpoint* libre (ver `select_endpoint`) y hace
     /// preflight para fallar con un mensaje claro en vez del 500 opaco de Docker.
     pub async fn ensure_nginx(&self) -> Result<()> {
+        // Carpetas de worktrees externas (Configuración): nginx sirve los assets
+        // del `git worktree` desde ahí. Si falta alguna en el container vivo (se
+        // eligió una carpeta nueva), se recrea para montarla.
+        let wt_binds: Vec<String> = crate::config::worktree_bases()
+            .into_iter()
+            .filter(|b| std::path::Path::new(b).is_dir())
+            .map(|b| format!("{b}:{}:ro", nginx::worktrees_mount(&b)))
+            .collect();
         if self.is_running(NGINX).await {
-            return Ok(());
+            let current = self
+                .docker
+                .inspect_container(NGINX, None)
+                .await
+                .ok()
+                .and_then(|i| i.host_config)
+                .and_then(|h| h.binds)
+                .unwrap_or_default();
+            if wt_binds.iter().all(|b| current.contains(b)) {
+                return Ok(());
+            }
         }
         self.ensure_network().await?;
 
@@ -541,10 +559,11 @@ impl DockerManager {
             }]),
         );
 
-        let binds = vec![
+        let mut binds = vec![
             format!("{}:/etc/nginx/conf.d:ro", conf_d.display()),
             format!("{}:/srv/projects:ro", projects.display()),
         ];
+        binds.extend(wt_binds);
 
         let mut exposed = HashMap::new();
         exposed.insert("80/tcp".to_string(), HashMap::new());

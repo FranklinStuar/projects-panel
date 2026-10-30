@@ -116,6 +116,11 @@ pub struct WorktreeInfo {
     /// en el wp-config propio, sin mutar la DB); `false` = esquema propio copiado.
     pub shared_db: bool,
     pub created_at: String,
+    /// Carpeta base (absoluta) de los checkouts, tomada de Configuración al crear
+    /// el worktree: el `git worktree` queda en `{base}/{slug}/{basename}`.
+    /// `None` = ubicación por defecto `{path}/wt/` (y worktrees anteriores).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktrees_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,9 +228,16 @@ impl SiteConfig {
     }
 
     /// Carpeta del host que alberga el(los) `git worktree` de un worktree-project
-    /// (`{path}/wt/`). Cada repo objetivo se chequea en `wt/{basename}`.
+    /// (`{path}/wt/`, o `{worktrees_dir}/{slug}/` si se creó con carpeta de
+    /// worktrees configurada). Cada repo objetivo se chequea en `{root}/{basename}`.
     pub fn worktree_root(&self) -> PathBuf {
-        Path::new(&self.path).join("wt")
+        match self.worktree_of.as_ref().and_then(|w| w.worktrees_dir.as_deref()) {
+            Some(base) => {
+                let slug = Path::new(&self.path).file_name().unwrap_or_default();
+                Path::new(base).join(slug)
+            }
+            None => Path::new(&self.path).join("wt"),
+        }
     }
 
     /// `wp-config.php` propio del worktree-project (se monta sobre el del padre).
@@ -298,6 +310,10 @@ impl Endpoint {
 pub struct PanelConfig {
     #[serde(default)]
     pub endpoint: Option<Endpoint>,
+    /// Carpeta base para los checkouts de worktrees nuevos. `None` = `{path}/wt/`
+    /// dentro de cada worktree-project. Ver `WorktreeInfo::worktrees_dir`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktrees_dir: Option<String>,
 }
 
 /// `~/.config/wordpress-panel/panel.json` (estado global del panel).
@@ -344,6 +360,53 @@ pub fn clear_endpoint() -> Result<()> {
     let mut cfg = load_panel_config()?;
     cfg.endpoint = None;
     save_panel_config(&cfg)
+}
+
+/// Carpeta de worktrees configurada (si la hay).
+pub fn load_worktrees_dir() -> Result<Option<String>> {
+    Ok(load_panel_config()?.worktrees_dir)
+}
+
+/// Fija (o con `None`/vacío, quita) la carpeta base de los worktrees nuevos.
+/// Debe ser absoluta (se acepta `~/`); se crea si no existe. Solo afecta a
+/// worktrees creados después: cada uno guarda la suya en `WorktreeInfo`.
+pub fn save_worktrees_dir(dir: Option<&str>) -> Result<Option<String>> {
+    let dir = match dir.map(str::trim).filter(|d| !d.is_empty()) {
+        None => None,
+        Some(d) => {
+            let expanded = match d.strip_prefix("~/") {
+                Some(rest) => dirs::home_dir()
+                    .context("no se pudo determinar el home del usuario")?
+                    .join(rest),
+                None => PathBuf::from(d),
+            };
+            if !expanded.is_absolute() {
+                anyhow::bail!("la carpeta de worktrees debe ser una ruta absoluta");
+            }
+            std::fs::create_dir_all(&expanded)
+                .with_context(|| format!("creando {:?}", expanded))?;
+            let canon = expanded.canonicalize().unwrap_or(expanded);
+            Some(canon.to_string_lossy().trim_end_matches('/').to_string())
+        }
+    };
+    let mut cfg = load_panel_config()?;
+    cfg.worktrees_dir = dir.clone();
+    save_panel_config(&cfg)?;
+    Ok(dir)
+}
+
+/// Carpetas base de worktrees que `panel-nginx` debe montar: la configurada más
+/// las que usen worktrees existentes (creados con una configuración anterior).
+pub fn worktree_bases() -> Vec<String> {
+    let mut out: Vec<String> = load_worktrees_dir().ok().flatten().into_iter().collect();
+    for s in load_all_sites().unwrap_or_default() {
+        if let Some(b) = s.worktree_of.and_then(|w| w.worktrees_dir) {
+            if !out.contains(&b) {
+                out.push(b);
+            }
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

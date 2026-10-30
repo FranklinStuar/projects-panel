@@ -733,3 +733,12 @@ El panel compila y corre en macOS (Apple Silicon/Intel) además de Linux.
 - Fix: `ensure_db`/`ensure_nginx`/mailpit/minio/adminer crean `panel-net` si
   falta (crear un sitio llamaba a `ensure_db` sin red → 404 de Docker en una
   instalación sin `first-run.sh`).
+
+## Carpeta de worktrees configurable
+
+- Configuración → Rutas → **Worktrees**: elegir dónde se crea el `git worktree`
+  de los worktree-projects nuevos (`panel.json` `worktreesDir`; vacío = `{path}/wt/`).
+- Cada worktree persiste su base en `WorktreeInfo.worktreesDir`: cambiar el ajuste
+  no rompe los existentes. `panel-nginx` monta cada base en uso en
+  `/srv/worktrees/{hash}` y se recrea si falta un montaje. Borrar el worktree
+  limpia también su carpeta externa. Comandos `get_worktrees_dir`/`set_worktrees_dir`.

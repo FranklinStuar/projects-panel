@@ -85,6 +85,14 @@ que los assets de la rama se vean. La BD es la del padre (constantes
 `WP_HOME`/`WP_SITEURL` evitan mutarla) o una copia propia. Eliminar = `git
 worktree remove` (la rama persiste) + borrar carpeta: sin rastro.
 
+**Carpeta de worktrees configurable** (Configuración → Rutas, `panel.json`
+`worktreesDir`): si está fijada, el checkout de los worktrees *nuevos* va a
+`{worktreesDir}/{slug}/{basename}` en vez de `{path}/wt/`. Cada worktree guarda
+su base en `WorktreeInfo.worktreesDir` (cambiar el ajuste no rompe los ya
+creados); `SiteConfig::worktree_root()` resuelve ambos casos. `panel-nginx` monta
+cada base en uso (`config::worktree_bases`) en `nginx::worktrees_mount(base)`
+(`/srv/worktrees/{fnv1a}`, ro) y `ensure_nginx` lo recrea si falta un montaje.
+
 ### UID/GID (crítico)
 `www-data` en alpine = uid 82 ≠ host (1000). El `entrypoint.sh` de la imagen php
 ejecuta `usermod/groupmod` para alinear www-data a `PUID/PGID`. Sin esto WordPress
@@ -151,6 +159,8 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 | `system_status` | — | `SystemStatus` | Estado de prerequisitos (Docker, red, dnsmasq, mkcert, wrappers, plasmoid) + endpoint y rutas. |
 | `create_panel_network` | — | `()` | Crea el bridge `panel-net` si falta. |
 | `reset_endpoint` | — | `()` | Olvida el endpoint persistido (reasigna puerto al próximo arranque). |
+| `get_worktrees_dir` | — | `Option<String>` | Carpeta base de checkouts de worktrees (`None` = `{path}/wt`). |
+| `set_worktrees_dir` | `dir?` | `Option<String>` | Fija/restablece la carpeta de worktrees (absoluta o `~/`; se crea). Recrea `panel-nginx` si corre y le falta el montaje. |
 | `migrate_site` | `id` | `Migration` | Migra un proyecto pendiente (DB + dump + SSL) y lo enciende. Emite `op-log`. |
 | `delete_site` | `id`, `deleteFolder` | `()` | Borra un proyecto: apaga + container/vhost + DROP de su DB del servidor compartido. `deleteFolder=true` borra la carpeta entera; `false` la desconecta del panel renombrando `config.json` → `config.disconnected.json` (los archivos y la config quedan para re-importar). Emite `op-log` con cada paso. |
 | `list_localwp_sites` | — | `Vec<LocalSite>` | Sitios de LocalWP candidatos a importar. |

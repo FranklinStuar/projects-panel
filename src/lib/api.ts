@@ -35,6 +35,8 @@ export const api = {
   systemStatus: () => invoke<SystemStatus>('system_status'),
   createPanelNetwork: () => invoke<void>('create_panel_network'),
   resetEndpoint: () => invoke<void>('reset_endpoint'),
+  getWorktreesDir: () => invoke<string | null>('get_worktrees_dir'),
+  setWorktreesDir: (dir: string | null) => invoke<string | null>('set_worktrees_dir', { dir }),
   migrateSite: (id: string) => invoke<Migration>('migrate_site', { id }),
   deleteSite: (id: string, deleteFolder: boolean) =>
     invoke<void>('delete_site', { id, deleteFolder }),
