@@ -179,7 +179,10 @@
     load();
     // Recarga cuando el CLI/MCP muta proyectos por D-Bus (worktree, clone, start/stop…).
     const un = listen('sites-changed', () => load());
-    return () => { un.then((f) => f()); };
+    // Y al volver a la ventana: cubre cambios hechos fuera del panel sin evento
+    // (terminal, macOS sin D-Bus…), sin dejar un watcher corriendo.
+    window.addEventListener('focus', load);
+    return () => { un.then((f) => f()); window.removeEventListener('focus', load); };
   });
 </script>
 
