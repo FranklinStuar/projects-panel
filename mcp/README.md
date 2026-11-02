@@ -3,7 +3,7 @@
 Servidor [MCP](https://modelcontextprotocol.io) que expone el **Panel WP** a
 agentes IA (Claude Code, opencode, …). Es un **envoltorio fino** sobre
 `wordpress-panel-cli`: cada herramienta lanza el CLI, que a su vez habla con el
-**panel EN EJECUCIÓN** por D-Bus. No reimplementa lógica ni duplica estado.
+**panel EN EJECUCIÓN** por D-Bus (Linux) o socket Unix (macOS). No reimplementa lógica ni duplica estado.
 
 - **Sin dependencias.** Un solo archivo Node (`server.mjs`), protocolo MCP por
   stdio implementado a mano. No hay `npm install` ni build.

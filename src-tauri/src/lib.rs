@@ -6,7 +6,7 @@ mod backup;
 mod cli;
 mod clone;
 mod config;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 mod dbus;
 mod docker;
 mod domain;
@@ -21,6 +21,8 @@ mod nginx;
 mod php;
 mod progress;
 mod snapshot;
+#[cfg(target_os = "macos")]
+mod socket;
 mod ssl;
 mod system;
 mod wordpress;
@@ -1087,6 +1089,16 @@ pub fn run() {
                         std::future::pending::<()>().await;
                     }
                     Err(err) => eprintln!("D-Bus no disponible: {err}"),
+                }
+            });
+
+            // En macOS el CLI/MCP llega por socket Unix (mismos métodos que D-Bus).
+            #[cfg(target_os = "macos")]
+            let handle = app.handle().clone();
+            #[cfg(target_os = "macos")]
+            tauri::async_runtime::spawn(async move {
+                if let Err(err) = socket::serve(handle).await {
+                    eprintln!("socket del CLI no disponible: {err:#}");
                 }
             });
             Ok(())

@@ -5,9 +5,10 @@
 #   wordpress-panel-cli git        {scan|status|pull|set-deploy|deploy} …
 #   wordpress-panel-cli worktree   {list|create|remove} …
 #
-# Todas las operaciones hablan con el panel EN EJECUCIÓN por D-Bus (reusan su
-# lógica: container, nginx, BD, git). Si el panel no está abierto, fallan
-# pidiendo abrirlo.
+# Todas las operaciones hablan con el panel EN EJECUCIÓN (reusan su lógica:
+# container, nginx, BD, git): por D-Bus en Linux y por el socket Unix
+# `~/.config/wordpress-panel/panel.sock` en macOS (mismos métodos). Si el panel
+# no está abierto, fallan pidiendo abrirlo.
 set -e
 
 CMD="${1:-}"
@@ -16,6 +17,19 @@ ROOT="${PANEL_WP_ROOT:-$HOME/panel-wp}"
 DBUS_DEST="com.goldmediatech.WordpressPanel"
 DBUS_PATH="/com/goldmediatech/WordpressPanel"
 DBUS_IFACE="com.goldmediatech.WordpressPanel.Manager"
+
+# macOS no tiene D-Bus: el panel sirve los mismos métodos por socket Unix.
+IS_MAC=""; [ "$(uname -s)" = "Darwin" ] && IS_MAC=1
+PANEL_SOCK="${XDG_CONFIG_HOME:-$HOME/.config}/wordpress-panel/panel.sock"
+
+# Llama un método por el socket (macOS). Imprime el resultado crudo: JSON,
+# true/false o vacío. Petición = una línea {"method","args":[texto…]}.
+sock_call() {
+    local method="$1"; shift
+    [ -S "$PANEL_SOCK" ] || return 1
+    jq -nc --arg m "$method" '{method: $m, args: $ARGS.positional}' --args "$@" \
+        | nc -U "$PANEL_SOCK"
+}
 
 # Resuelve "id|path" del proyecto que contiene la ruta dada (o vacío).
 project_for() {
@@ -33,10 +47,12 @@ project_for() {
     return 1
 }
 
-# Llama un método del panel por D-Bus. Imprime el resultado crudo en stdout.
+# Llama un método del panel (D-Bus o socket en macOS). Imprime el resultado crudo en stdout.
 dbus_call() {
     local method="$1"; shift
-    if command -v gdbus >/dev/null 2>&1; then
+    if [ -n "$IS_MAC" ]; then
+        sock_call "$method" "$@"
+    elif command -v gdbus >/dev/null 2>&1; then
         gdbus call --session --dest "$DBUS_DEST" --object-path "$DBUS_PATH" \
             --method "$DBUS_IFACE.$method" "$@"
     elif command -v qdbus6 >/dev/null 2>&1; then
@@ -51,7 +67,9 @@ dbus_call() {
 # gdbus envuelve el resultado en una tupla ('<json escapado>',); qdbus6 no.
 dbus_json() {
     local raw pretty
-    if command -v qdbus6 >/dev/null 2>&1; then
+    if [ -n "$IS_MAC" ]; then
+        raw="$(sock_call "$@")"
+    elif command -v qdbus6 >/dev/null 2>&1; then
         # qdbus6 imprime el valor crudo, sin envoltura ni escapes.
         raw="$(qdbus6 "$DBUS_DEST" "$DBUS_PATH" "$DBUS_IFACE.$1" "${@:2}")"
     elif command -v gdbus >/dev/null 2>&1; then
@@ -71,17 +89,15 @@ dbus_json() {
 }
 
 require_panel() {
-    if command -v gdbus >/dev/null 2>&1; then
+    if [ -n "$IS_MAC" ]; then
+        [ -n "$(sock_call GetRunningSites 2>/dev/null)" ] && return 0
+    elif command -v gdbus >/dev/null 2>&1; then
         gdbus call --session --dest "$DBUS_DEST" --object-path "$DBUS_PATH" \
             --method "$DBUS_IFACE.GetRunningSites" >/dev/null 2>&1 && return 0
     elif command -v qdbus6 >/dev/null 2>&1; then
         qdbus6 "$DBUS_DEST" "$DBUS_PATH" "$DBUS_IFACE.GetRunningSites" >/dev/null 2>&1 && return 0
     fi
-    if [ "$(uname -s)" = "Darwin" ]; then
-        echo "error: este comando habla con el panel por D-Bus y aún no está disponible en macOS (usa la GUI; \`wp\` y \`detect-project\` sí funcionan)" >&2
-    else
-        echo "error: el panel WordPress no está en ejecución (ábrelo para usar el panel)" >&2
-    fi
+    echo "error: el panel WordPress no está en ejecución (ábrelo para usar el panel)" >&2
     exit 4
 }
 
@@ -106,9 +122,9 @@ resolve_pid() {
     # nombre por subcadena (case-insensitive)
     local matches; matches="$(printf '%s' "$sites" | jq -r --arg a "$arg" '.[]|select(.name|ascii_downcase|contains($a|ascii_downcase))|"\(.id)\t\(.name)"')"
     local n; n="$(printf '%s' "$matches" | grep -c . || true)"
-    if [ "$n" = "0" ]; then echo "no hay proyecto que coincida con «$arg»" >&2; exit 1; fi
+    if [ "$n" = "0" ]; then echo "no hay proyecto que coincida con «${arg}»" >&2; exit 1; fi
     if [ "$n" != "1" ]; then
-        echo "«$arg» es ambiguo, coincide con:" >&2
+        echo "«${arg}» es ambiguo, coincide con:" >&2
         printf '%s\n' "$matches" | cut -f2 | sed 's/^/  - /' >&2
         exit 2
     fi
@@ -128,7 +144,7 @@ git_target_path() {
 
 usage() {
     cat <<'EOF'
-wordpress-panel-cli — CLI del Panel WP (habla con el panel EN EJECUCIÓN por D-Bus)
+wordpress-panel-cli — CLI del Panel WP (habla con el panel EN EJECUCIÓN: D-Bus en Linux, socket en macOS)
 
 USO:
   wordpress-panel-cli <grupo> <subcomando> [opciones]
@@ -347,7 +363,7 @@ worktree)
             TARGET="${top#"$ppath"/app/public/}"
             [ "$TARGET" != "$top" ] || { echo "el repo $top no está bajo este proyecto" >&2; exit 2; }
         fi
-        echo "Creando worktree «$BRANCH» de $TARGET (BD $([ "$SHARED" = true ] && echo compartida || echo copia))…"
+        echo "Creando worktree «${BRANCH}» de $TARGET (BD $([ "$SHARED" = true ] && echo compartida || echo copia))…"
         dbus_call CreateWorktree "$pid" "$TARGET" "$BRANCH" "$BASE" "$SHARED"
         ;;
     remove)

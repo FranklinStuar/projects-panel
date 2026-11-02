@@ -119,7 +119,8 @@ no escribe uploads/plugins y el usuario no puede editar archivos clonados con `g
 | `autologin.rs` | `open_admin`: token efímero (transient WP, 60s, un solo uso) + abre navegador; el mu-plugin `panel-autologin.php` valida y loguea al usuario. El transient almacena el `user_id` destino: `> 0` = ese usuario exacto, `0` = primer administrador (retrocompatible). Llama `wordpress::inject_autologin_muplugin` antes de crear el token para garantizar la versión actual del plugin aunque el proyecto se creara antes. El mu-plugin lo inyecta `wordpress::sync_mu_plugins` al crear/migrar; `repair_autologin` lo reinyecta en proyectos viejos. Redirect: admin WP si tiene `manage_options`, home si no. |
 | `github.rs` | `gh`/`git` en el HOST (no container, los archivos están bind-montados): `status`, `clone`, `pull`, `remove_dir`, `propose_path`. `scan` autodetecta repos git bajo wp-content (`DetectedRepo`); `read_repo_meta` lee remoto/rama de un huérfano; `open_vscode` + `ensure_workspace` (genera `.code-workspace` multi-root, una vez). Repos en `github.repos` (lista genérica; `GithubConfig::normalize` pliega el legacy theme/plugins). Sin auth propia. |
 | `ssl.rs` | `generate`: cert/key por dominio con mkcert en `ssl/` del proyecto. La CA local (`mkcert -install`) se hace una vez en `first-run.sh`. |
-| `dbus.rs` | Servidor D-Bus (zbus) para el plasmoid KDE; arranca en el `setup` de Tauri. Ver sección D-Bus. |
+| `dbus.rs` | Servidor D-Bus (zbus) para el plasmoid KDE y el CLI; arranca en el `setup` de Tauri. En macOS se compila sin zbus y `Manager::call` despacha por nombre. Ver sección D-Bus. |
+| `socket.rs` | (macOS) Socket Unix `config_dir/panel.sock` con los mismos métodos que D-Bus, para `wordpress-panel-cli`/MCP. |
 | `backup.rs` | `dump_bytes`: captura `mysqldump` (dentro del container DB, socket local) en memoria. `export_db`/`export_db_to`: lo escriben en `app/sql/db-{timestamp}.sql`. `rotate_dumps`: deja solo los N `db-*.sql` más recientes. `stop_site` los invoca para exportar-al-detener. El auto-dump (`autodump.rs`) reusa `dump_bytes`. |
 | `autodump.rs` | Estado Tauri `AutoDump` (`Mutex<HashMap<id, JoinHandle>>`): un watcher por proyecto activo que protege contra pérdida de datos por apagón. Sondea cada 20s; gate barato por `SHOW GLOBAL STATUS Innodb_rows_*` (no vuelca si la DB está ociosa); cuando hay escrituras, `dump_bytes` + hash y si difiere del último, persiste un dump nuevo en `app/sql/` + `rotate_dumps` + lo registra en `dumplog` (source `auto`). Se engancha en `start_site` y en el `setup` (sitios ya activos al abrir); se aborta en `stop_site`/`stop_all_sites`. |
 | `dumplog.rs` | Log de volcados de DB (`config_dir/dump-log.jsonl`, JSONL `DumpLogEntry`): una línea por cada dump escrito en `app/sql/` para revisar y comparar. `append` (lo llaman auto-dump, export-al-detener y export manual con su `source`), `read_all` (más nuevos primero), `clean(before?, dbName?)` (poda por fecha y/o base de datos; sin filtros borra todo; no toca los `.sql`). |
@@ -209,9 +210,10 @@ Definidos en `lib.rs`, expuestos en `src/lib/api.ts`. Todos `async`, retornan
 **Eventos** (backend → frontend, vía `app.emit`): `log:{id}` — una línea de log de
 container por evento; `op-log` — línea de progreso de una operación larga
 (migración/import/borrado), mostrada en `OpConsole.svelte`; `sites-changed` — sin
-payload, lo emiten los métodos D-Bus que mutan proyectos (start/stop, worktree,
+payload, lo emiten los métodos D-Bus/socket que mutan proyectos (start/stop, worktree,
 clone) para que la lista de `+page.svelte` se recargue sola tras un cambio hecho
-desde el CLI/MCP. El frontend se suscribe con `listen()` de `@tauri-apps/api/event`. Estado
+desde el CLI/MCP. La lista también se recarga al enfocar la ventana (cubre
+cambios hechos fuera del panel sin evento). El frontend se suscribe con `listen()` de `@tauri-apps/api/event`. Estado
 de los streams activos en `LogStreams` (managed state, `Mutex<HashMap>`).
 El canal `op-log` también lo emite el **frontend** (con `emit()`) para las líneas
 de la ventana de gracia del borrado (cuenta atrás de 5 s antes de llamar a
@@ -273,11 +275,19 @@ usuario). Instalación: `kpackagetool6 --install` (lo hace `first-run.sh`).
 El servidor arranca en el `setup` de Tauri; si no hay sesión D-Bus, el panel
 sigue funcionando sin widget.
 
+**macOS (socket Unix).** Sin D-Bus, `socket.rs` sirve el mismo `Manager` en
+`config_dir/panel.sock` (permisos 0600, se recrea al arrancar). Protocolo: una
+petición por conexión, una línea JSON `{"method":"CreateWorktree","args":["…"]}`
+con los nombres de la tabla y argumentos en texto (`"true"`/`"false"` para bool);
+la respuesta es el retorno tal cual (JSON, `true`/`false` o vacío) más `\n`. El
+despacho vive en `dbus::Manager::call`: **al añadir un método D-Bus, añádelo
+también ahí**. El CLI elige transporte por `uname` (`sock_call`: `jq` + `nc -U`).
+
 **MCP (`mcp/`)** — envoltorio fino sobre `wordpress-panel-cli` (que a su vez habla
-por D-Bus con el panel en ejecución) que expone el panel a agentes IA vía MCP por
+por D-Bus —o socket en macOS— con el panel en ejecución) que expone el panel a agentes IA vía MCP por
 stdio. Node sin dependencias (`mcp/server.mjs`); no reimplementa lógica ni guarda
 estado. Ver `mcp/README.md` para el catálogo de herramientas y el registro en
-Claude Code / opencode. Los métodos D-Bus que mutan proyectos emiten `sites-changed`
+Claude Code / opencode. Los métodos D-Bus/socket que mutan proyectos emiten `sites-changed`
 para que la UI se recargue cuando el cambio viene del CLI/MCP.
 
 ## Rutas en disco

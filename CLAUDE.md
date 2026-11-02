@@ -47,7 +47,8 @@ En Wayland, si la ventana sale en blanco: `WEBKIT_DISABLE_DMABUF_RENDERER=1 pnpm
 rustup es keg-only → `export PATH="/opt/homebrew/opt/rustup/bin:$PATH"`) y Docker
 Desktop/OrbStack/Colima. `first-run.sh` instala dnsmasq/mkcert/nss/jq/zstd y crea
 `/etc/resolver/test`. Lo específico de plataforma va tras `#[cfg(target_os = …)]`
-(D-Bus/plasmoid solo Linux); ver "Soporte macOS" en `docs/CHANGELOG.md`.
+(D-Bus/plasmoid solo Linux; en macOS el CLI/MCP llega por el socket Unix de
+`socket.rs` con los mismos métodos de `dbus.rs`); ver "Soporte macOS" en `docs/CHANGELOG.md`.
 
 ## Estructura (resumen)
 
@@ -67,7 +68,7 @@ src-tauri/src/           backend Rust
   groups.rs              lista durable de grupos (config_dir/groups.json)
   docker.rs              orquestación bollard (red, compartidos, ciclo de vida)
   nginx.rs / php.rs / domain.rs / wpcli.rs / wordpress.rs
-  logs.rs / autologin.rs / github.rs / ssl.rs / dbus.rs
+  logs.rs / autologin.rs / github.rs / ssl.rs / dbus.rs / socket.rs (macOS)
   backup.rs (export DB) / cli.rs (instala wrapper wp en ~/.local/bin)
 docker/                  Dockerfile php-fpm + entrypoint, plantillas, mu-plugins
 scripts/                 first-run.sh, wp-wrapper.sh, wordpress-panel-cli.sh

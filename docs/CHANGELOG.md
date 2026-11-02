@@ -724,8 +724,19 @@ El panel compila y corre en macOS (Apple Silicon/Intel) además de Linux.
 - **Puertos** (`netcheck.rs`): sin `/proc`; usa `lsof -F` + `bind` de prueba.
 - **Rutas**: `config_dir` = `~/.config/wordpress-panel` también en macOS (no
   `~/Library/Application Support`, con espacio).
-- **D-Bus/plasmoid**: solo Linux (`zbus` es dependencia `cfg(linux)`, `mod dbus`
-  gateado). `SystemStatus.platform` permite a la UI ocultar el plasmoid.
+- **D-Bus/plasmoid**: solo Linux (`zbus` es dependencia `cfg(linux)`).
+  `SystemStatus.platform` permite a la UI ocultar el plasmoid.
+- **CLI/MCP por socket Unix** (`socket.rs`): en macOS el panel sirve los mismos
+  métodos de `dbus.rs` en `~/.config/wordpress-panel/panel.sock` (el `Manager`
+  se compila sin `#[interface]`; `Manager::call` despacha por nombre).
+  `wordpress-panel-cli` usa `jq` + `nc -U` en vez de `gdbus`, así que `worktree`,
+  `snapshot`, `git`, `start/stop`, `open admin|site`… y el MCP funcionan igual
+  que en Linux. Antes fallaban y un agente acabó haciendo `git worktree add` a
+  mano (sin config/container/vhost → invisible en el panel).
+- La lista de proyectos se recarga al enfocar la ventana (cambios hechos fuera
+  del panel sin evento `sites-changed`).
+- Fix CLI: `«$VAR»` con bash 3.2 (macOS) se comía la variable (el byte de `»`
+  contaba como parte del nombre) → `«${VAR}»`.
 - **Apps externas**: terminal = `open -a Terminal`; VSCode cae a `open -a`.
   El PATH se amplía al arrancar (Homebrew, Docker Desktop) para lanzamientos
   desde Finder.

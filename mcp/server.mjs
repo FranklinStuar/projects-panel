@@ -2,7 +2,7 @@
 // Servidor MCP de Panel WP — envoltorio fino sobre `wordpress-panel-cli`.
 //
 // No reimplementa nada: cada herramienta lanza el CLI (que habla con el panel
-// EN EJECUCIÓN por D-Bus) y devuelve su salida. Para los comandos que el CLI
+// EN EJECUCIÓN por D-Bus o, en macOS, por socket Unix) y devuelve su salida. Para los comandos que el CLI
 // autodetecta por directorio, resolvemos el proyecto (por id o nombre) a su
 // carpeta y lanzamos el CLI con esa carpeta como cwd.
 //

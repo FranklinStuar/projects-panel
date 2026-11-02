@@ -3,17 +3,25 @@
 //! Expone `com.goldmediatech.WordpressPanel.Manager` en la sesión del usuario.
 //! El plasmoid consulta proyectos activos y puede detenerlos / cerrar el panel.
 //! Para evitar tipos D-Bus complejos, `GetRunningSites` devuelve JSON.
+//!
+//! En macOS no hay D-Bus: el mismo `Manager` se compila sin `#[interface]` y lo
+//! sirve `socket.rs` por un socket Unix, despachando con [`Manager::call`]. Así
+//! `wordpress-panel-cli` (y el MCP, que lo envuelve) funcionan igual en ambos.
 
+#[cfg(target_os = "linux")]
 use anyhow::{Context, Result};
 use serde::Serialize;
 use tauri::{Emitter as _, Manager as _};
 use tauri_plugin_opener::OpenerExt;
+#[cfg(target_os = "linux")]
 use zbus::interface;
 
 use crate::config;
 use crate::docker::DockerManager;
 
+#[cfg(target_os = "linux")]
 const SERVICE: &str = "com.goldmediatech.WordpressPanel";
+#[cfg(target_os = "linux")]
 const PATH: &str = "/com/goldmediatech/WordpressPanel";
 
 #[derive(Serialize)]
@@ -23,17 +31,17 @@ struct RunningSite {
     domain: String,
 }
 
-struct Manager {
-    app: tauri::AppHandle,
+pub(crate) struct Manager {
+    pub(crate) app: tauri::AppHandle,
 }
 
 /// Avisa al frontend de que la lista/estado de proyectos cambió por una
-/// mutación vía CLI/MCP (D-Bus), para que la UI recargue sola.
+/// mutación vía CLI/MCP (D-Bus o socket), para que la UI recargue sola.
 fn notify_sites_changed(app: &tauri::AppHandle) {
     let _ = app.emit("sites-changed", ());
 }
 
-#[interface(name = "com.goldmediatech.WordpressPanel.Manager")]
+#[cfg_attr(target_os = "linux", interface(name = "com.goldmediatech.WordpressPanel.Manager"))]
 impl Manager {
     /// JSON con los proyectos en ejecución: `[{id,name,domain}, ...]`.
     async fn get_running_sites(&self) -> String {
@@ -439,11 +447,62 @@ impl Manager {
     }
 }
 
+#[cfg(target_os = "macos")]
+impl Manager {
+    /// Despacha un método por su nombre D-Bus (`CreateWorktree`…) con argumentos
+    /// posicionales en texto, como los pasa el CLI. Devuelve el resultado como
+    /// texto: JSON tal cual, `true`/`false` para los booleanos, vacío para `Quit`.
+    pub(crate) async fn call(&self, method: &str, args: &[String]) -> Result<String, String> {
+        let a = |i: usize| args.get(i).cloned().unwrap_or_default();
+        let b = |i: usize| a(i) == "true";
+        let want = |n: usize| {
+            if args.len() == n {
+                Ok(())
+            } else {
+                Err(format!("{method}: se esperaban {n} argumentos, llegaron {}", args.len()))
+            }
+        };
+        Ok(match method {
+            "GetRunningSites" => { want(0)?; self.get_running_sites().await }
+            "ListSites" => { want(0)?; self.list_sites().await }
+            "StopSite" => { want(1)?; self.stop_site(a(0)).await.to_string() }
+            "StopAll" => { want(0)?; self.stop_all().await.to_string() }
+            "StartSite" => { want(1)?; self.start_site(a(0)).await.to_string() }
+            "SetUploadLimit" => { want(2)?; self.set_upload_limit(a(0), a(1)).await }
+            "OpenAdmin" => { want(1)?; self.open_admin(a(0)).await }
+            "OpenSite" => { want(1)?; self.open_site(a(0)).await }
+            "ProjectContainers" => { want(1)?; self.project_containers(a(0)).await }
+            "Quit" => { want(0)?; self.quit().await; String::new() }
+            "ListWorktrees" => { want(1)?; self.list_worktrees(a(0)).await }
+            "CreateWorktree" => {
+                want(5)?;
+                self.create_worktree(a(0), a(1), a(2), a(3), b(4)).await
+            }
+            "RemoveWorktree" => { want(2)?; self.remove_worktree(a(0), b(1)).await.to_string() }
+            "CreateSnapshot" => { want(2)?; self.create_snapshot(a(0), a(1)).await }
+            "ListSnapshots" => { want(1)?; self.list_snapshots(a(0)).await }
+            "DeleteSnapshot" => { want(2)?; self.delete_snapshot(a(0), a(1)).await.to_string() }
+            "CreateClone" => { want(2)?; self.create_clone(a(0), a(1)).await }
+            "GhScan" => { want(1)?; self.gh_scan(a(0)).await }
+            "GhPull" => { want(3)?; self.gh_pull(a(0), a(1), a(2)).await }
+            "GhBranchStatus" => { want(3)?; self.gh_branch_status(a(0), a(1), a(2)).await }
+            "GhBuildDirs" => { want(2)?; self.gh_build_dirs(a(0), a(1)).await }
+            "GhSetDeploy" => {
+                want(5)?;
+                self.gh_set_deploy(a(0), a(1), a(2), a(3), a(4)).await.to_string()
+            }
+            "GhDeploy" => { want(2)?; self.gh_deploy(a(0), a(1)).await }
+            _ => return Err(format!("método desconocido: {method}")),
+        })
+    }
+}
+
 fn err_json(msg: &str) -> String {
     serde_json::json!({ "ok": false, "error": msg }).to_string()
 }
 
 /// Arranca el servidor D-Bus y devuelve la conexión (mantenerla viva).
+#[cfg(target_os = "linux")]
 pub async fn serve(app: tauri::AppHandle) -> Result<zbus::Connection> {
     let manager = Manager { app };
     let conn = zbus::connection::Builder::session()
