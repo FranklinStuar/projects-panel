@@ -55,6 +55,7 @@ módulos privados). Cada uno usa nombres `zztest-*` y limpia lo suyo.
 | `list_e_import_disconnected_hermetico` | **No** | Monta `panel-wp/` temporal con un proyecto vivo (excluido), uno desconectado (`config.disconnected.json` + dump) y una carpeta sin config (`wp-config.php`). Verifica `list_disconnected_sites` (preserved/reconstructed, `hasDump`) e `import_disconnected` (restaura `config.json` `migrationPending=true`, quita el sidecar, deduce `dbName`). |
 | `db_lifecycle_idempotente` | Sí | `ensure_db` + `create_database` dos veces (idempotente); la DB compartida queda arriba. |
 | `crear_exportar_migrar_e2e` | Sí | `create_site` real (descarga WordPress, 1ª vez construye `panel-php`) → `export_db` → `rotate_dumps` → `migrate_site`; al final apaga y borra el proyecto. |
+| `worktree_real` | Sí | Sobre un proyecto **real** (`PANEL_TEST_WT_PARENT` = id, `PANEL_TEST_WT_TARGET` = repo relativo a `public/`, opcional `PANEL_TEST_WT_BRANCH`): `create_worktree` con BD compartida, verifica container arriba y HTTP 200/301/302 vía nginx, y `remove_worktree` (borra la rama solo si la creó el test). Sin las variables hace SKIP, así que no rompe la suite `--ignored`. |
 
 **Prerequisitos de los tests con Docker:**
 - Docker corriendo y accesible.

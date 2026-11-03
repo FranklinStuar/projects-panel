@@ -392,3 +392,64 @@ async fn crear_exportar_migrar_e2e() {
 
     teardown(&docker, &site).await;
 }
+
+/// Worktree-project end-to-end sobre un proyecto **real** del usuario: crea un
+/// worktree (BD compartida) del repo `PANEL_TEST_WT_TARGET` (ruta relativa a
+/// `public/`), comprueba que el container queda arriba y que nginx lo sirve, y
+/// lo elimina borrando también la rama de prueba (si la creó el test).
+///
+/// ```text
+/// PANEL_TEST_WT_PARENT=<id-proyecto> PANEL_TEST_WT_TARGET=wp-content/themes/x \
+///   [PANEL_TEST_WT_BRANCH=feature/x] \
+///   cargo test -- --ignored --exact integration_tests::worktree_real --nocapture
+/// ```
+#[tokio::test]
+#[ignore = "real: crea y borra un worktree; requiere PANEL_TEST_WT_PARENT/TARGET"]
+async fn worktree_real() {
+    let (Ok(parent_id), Ok(target)) = (
+        std::env::var("PANEL_TEST_WT_PARENT"),
+        std::env::var("PANEL_TEST_WT_TARGET"),
+    ) else {
+        eprintln!("SKIP: define PANEL_TEST_WT_PARENT y PANEL_TEST_WT_TARGET");
+        return;
+    };
+
+    let app = mock();
+    let docker = DockerManager::connect().expect("docker");
+    docker.ensure_network().await.expect("panel-net");
+
+    // Rama a probar: PANEL_TEST_WT_BRANCH, o una desechable. Solo se borra al
+    // final si la creó el test (no existía antes en el repo del padre).
+    let branch = std::env::var("PANEL_TEST_WT_BRANCH")
+        .unwrap_or_else(|_| format!("zztest/wt-{}", &uuid::Uuid::new_v4().to_string()[..8]));
+    let parent = config::find_site(&parent_id).expect("leer padre").expect("padre existe");
+    let preexistente = std::process::Command::new("git")
+        .arg("-C")
+        .arg(parent.public_dir().join(&target))
+        .args(["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    let site = crate::worktree::create_worktree(app.handle(), &docker, &parent_id, &target, &branch, None, true)
+        .await
+        .expect("create_worktree");
+    eprintln!("CREADO: {} → {} ({})", site.name, site.domain, site.path);
+
+    let arriba = docker.is_running(&site.container_name()).await;
+    let url = config::endpoint_or_default().site_url(&site.domain, site.services.nginx.ssl);
+    let http = std::process::Command::new("curl")
+        .args(["-sk", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "30", &url])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .unwrap_or_default();
+    eprintln!("HTTP {url}: {http}");
+
+    crate::worktree::remove_worktree(app.handle(), &docker, &site.id, !preexistente)
+        .await
+        .expect("remove_worktree");
+    eprintln!("ELIMINADO");
+
+    assert!(arriba, "container {} arriba", site.container_name());
+    assert!(matches!(http.as_str(), "200" | "301" | "302"), "HTTP {http} en {url}");
+    assert!(!std::path::Path::new(&site.path).exists(), "carpeta borrada");
+}
