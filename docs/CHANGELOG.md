@@ -697,6 +697,10 @@ en las tres configs de Claude (`~/.claude`, `~/.claude-work`, `~/.claude-custom`
 
 ## Fixes
 
+- **PHP 8.5** disponible (selector de nuevo proyecto y `localwp::PHP_SUPPORTED`).
+  En 8.5 OPcache viene compilado dentro de PHP y `docker-php-ext-install opcache`
+  falla; el Dockerfile ahora lo instala solo si `php -m` no lo trae. 8.6 queda
+  fuera hasta su GA (sigue en RC, sin tag `8.6-fpm-alpine`).
 - **panel-nginx zombie tras apagón sucio** (`docker.rs::reload_nginx`): al cortar
   la corriente sin apagar Docker (p. ej. batería agotada), el daemon puede volver
   marcando el container "running" pero con sus namespaces muertos; el `exec` de

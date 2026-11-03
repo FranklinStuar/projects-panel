@@ -22,7 +22,7 @@ use crate::progress::log;
 
 /// Versiones soportadas por el panel (ver `PLAN.md`). Si la de LocalWP no está,
 /// se usa la más reciente y se avisa.
-const PHP_SUPPORTED: &[&str] = &["7.4", "8.0", "8.1", "8.2", "8.3", "8.4"];
+const PHP_SUPPORTED: &[&str] = &["7.4", "8.0", "8.1", "8.2", "8.3", "8.4", "8.5"];
 const MYSQL_SUPPORTED: &[&str] = &["8.0", "8.4"];
 
 // -- parseo tolerante de sites.json -----------------------------------------
@@ -306,7 +306,7 @@ mod tests {
     #[test]
     fn pick_supported_no_soportada_usa_mas_reciente() {
         // PHP antiguo → último soportado, marcado como ajustado.
-        assert_eq!(pick_supported("5.6", PHP_SUPPORTED), ("8.4".into(), true));
+        assert_eq!(pick_supported("5.6", PHP_SUPPORTED), ("8.5".into(), true));
         // MySQL intermedio no listado → 8.4 (último de la lista).
         assert_eq!(pick_supported("8.2", MYSQL_SUPPORTED), ("8.4".into(), true));
     }

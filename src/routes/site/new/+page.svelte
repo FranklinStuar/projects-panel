@@ -4,7 +4,7 @@
   import { api } from '$lib/api';
   import type { DbType, WpVersion, NewSiteRequest } from '$lib/types';
 
-  const PHP_VERSIONS = ['8.4', '8.3', '8.2', '8.1', '8.0', '7.4'];
+  const PHP_VERSIONS = ['8.5', '8.4', '8.3', '8.2', '8.1', '8.0', '7.4'];
   const DB_VERSIONS: Record<DbType, string[]> = {
     mysql: ['8.4', '8.0'],
     mariadb: ['11.4', '10.11', '10.6'],

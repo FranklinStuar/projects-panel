@@ -88,7 +88,7 @@ wp-{site-id}:
 
 ### Versiones Soportadas
 Basadas en lo que usa LocalWP actualmente en este sistema:
-- **PHP**: 7.4, 8.0, 8.1, 8.2, 8.3, 8.4 (imágenes `php:{ver}-fpm-alpine`)
+- **PHP**: 7.4, 8.0, 8.1, 8.2, 8.3, 8.4, 8.5 (imágenes `php:{ver}-fpm-alpine`)
 - **MySQL**: 8.0, 8.4
 - **MariaDB**: 10.6, 10.11, 11.4
 - **PostgreSQL**: 15, 16, 17

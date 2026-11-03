@@ -8,7 +8,9 @@ RUN set -eux; \
     apk add --no-cache --virtual .build-deps \
         $PHPIZE_DEPS freetype-dev libjpeg-turbo-dev libpng-dev libwebp-dev libzip-dev icu-dev; \
     docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp; \
-    docker-php-ext-install -j"$(nproc)" mysqli pdo_mysql gd zip intl exif opcache; \
+    docker-php-ext-install -j"$(nproc)" mysqli pdo_mysql gd zip intl exif; \
+    # Desde PHP 8.5 OPcache viene compilado dentro; antes es una extensión aparte.
+    php -m | grep -qi 'zend opcache' || docker-php-ext-install opcache; \
     apk add --no-cache freetype libjpeg-turbo libpng libwebp libzip icu-libs; \
     # shadow aporta usermod/groupmod para remapear www-data en runtime
     apk add --no-cache shadow su-exec; \

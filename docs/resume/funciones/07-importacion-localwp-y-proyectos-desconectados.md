@@ -257,7 +257,7 @@ No expone métodos específicos para estos flujos.
 - `localwp::tests::major_minor_recorta_patch`: `8.4.10 → 8.4`, `7.4 →
   7.4`, vacío → vacío.
 - `localwp::tests::pick_supported_soportada_sin_ajuste` /
-  `pick_supported_no_soportada_usa_mas_reciente`: PHP 5.6 → 8.4 ajustado,
+  `pick_supported_no_soportada_usa_mas_reciente`: PHP 5.6 → 8.5 ajustado,
   MySQL 8.2 → 8.4 ajustado.
 - `config::tests::siteconfig_roundtrip_camelcase`: valida que
   `migrationPending` se serializa camelCase.
