@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
+  import { askConfirm } from '$lib/confirm.svelte';
   import type { SystemStatus } from '$lib/types';
 
   let status = $state<SystemStatus | null>(null);
@@ -37,11 +38,11 @@
 
   async function resetEndpoint() {
     if (
-      !confirm(
+      !(await askConfirm(
         'Reasignar el puerto del panel. Solo afecta a proyectos creados después; ' +
           'los ya instalados guardan su URL con el puerto actual. Se reasigna en el ' +
           'próximo arranque de panel-nginx (apaga todos los proyectos primero). ¿Continuar?'
-      )
+      ))
     )
       return;
     await run(() => api.resetEndpoint(), 'Endpoint reiniciado — reasignará puerto al próximo arranque.');

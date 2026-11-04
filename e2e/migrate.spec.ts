@@ -4,14 +4,13 @@ import { test, expect } from '@playwright/test';
 // de su detalle, "Migrar y encender" abre la consola de progreso (OpConsole) que
 // se puebla en vivo con líneas `op-log`. Ver docs/TESTING.md §C.
 test('migrar muestra la consola de progreso y enciende el sitio', async ({ page }) => {
-  // El flujo pide confirm() antes de migrar.
-  page.on('dialog', (d) => d.accept());
-
   await page.goto('/');
 
   // Selecciona el proyecto pendiente → su detalle muestra "Migrar y encender".
   await page.getByText('Sitio Importado', { exact: true }).click();
   await page.getByRole('button', { name: 'Migrar y encender' }).click();
+  // El flujo pide confirmación (modal propio) antes de migrar.
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Aceptar' }).click();
 
   // La consola aparece con título "Migración".
   const consola = page.getByText('Migración', { exact: false });

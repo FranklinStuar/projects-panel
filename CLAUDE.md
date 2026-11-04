@@ -108,6 +108,9 @@ mcp/                      servidor MCP (server.mjs) para agentes IA; envuelve el
   no pasan por el ACL de Tauri 2, pero `app.emit`/`listen()` usan `core:event`, que
   sí. La capability está en `src-tauri/capabilities/default.json` (autodescubierta).
   Si un listener (p. ej. `OpConsole` con `op-log`) sale vacío, revísala primero.
+- **NO usar `window.confirm/alert/prompt`**: en macOS el WKWebView de Tauri no
+  los implementa (`confirm()` devuelve `false` en silencio). Usar
+  `await askConfirm(msg)` de `$lib/confirm.svelte` (modal `ConfirmDialog` en `+layout`).
 - **Container por proyecto NO publica puertos al host** — solo `panel-nginx` lo hace.
 - **Worktree-projects** (`worktree.rs`): un proyecto de prueba ligero atado a un
   repo del padre. NO copia código: comparte el `public` del padre por **montaje

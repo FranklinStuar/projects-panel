@@ -1,6 +1,7 @@
 <script lang="ts">
   import '../app.css';
   import { page } from '$app/state';
+  import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
   let { children } = $props();
 
@@ -101,3 +102,5 @@
     {@render children()}
   </main>
 </div>
+
+<ConfirmDialog />

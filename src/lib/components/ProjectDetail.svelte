@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { api } from '$lib/api';
+  import { askConfirm } from '$lib/confirm.svelte';
   import type { SiteState, SiteConfig, GhStatus, DetectedRepo, BranchStatus, Endpoint, SnapshotMeta, ExcludableEntry, WpUser } from '$lib/types';
   import OpConsole from '$lib/components/OpConsole.svelte';
   import DeleteProjectModal from '$lib/components/DeleteProjectModal.svelte';
@@ -187,7 +188,7 @@
   }
 
   async function deleteSnapshot(snapshotId: string) {
-    if (!confirm('¿Borrar este punto de guardado? No se puede deshacer.')) return;
+    if (!(await askConfirm('¿Borrar este punto de guardado? No se puede deshacer.'))) return;
     snapshotsError = null;
     try {
       await api.deleteSnapshot(id, snapshotId);
@@ -200,7 +201,7 @@
   async function cloneFromSnapshot(snapshotId: string) {
     const snap = snapshots.find((s) => s.id === snapshotId);
     if (!snap) return;
-    if (!confirm(`¿Crear un clone temporal desde «${snap.label}»?\nSe creará un proyecto nuevo basado en ese punto de guardado.`)) return;
+    if (!(await askConfirm(`¿Crear un clone temporal desde «${snap.label}»?\nSe creará un proyecto nuevo basado en ese punto de guardado.`))) return;
     cloning = true;
     cloneConsoleOpen = true;
     try {
@@ -252,7 +253,7 @@
 
   async function migrate() {
     if (!site) return;
-    if (!confirm(`Migrar "${site.config.name}" a este sistema (crear DB, importar dump, regenerar SSL) y encender?`))
+    if (!(await askConfirm(`Migrar "${site.config.name}" a este sistema (crear DB, importar dump, regenerar SSL) y encender?`)))
       return;
     busy = true;
     error = null;
@@ -272,7 +273,7 @@
 
   async function cancelImport() {
     if (!site) return;
-    if (!confirm(`Cancelar la importación de "${site.config.name}"? Se borrará su carpeta:\n${site.config.path}`))
+    if (!(await askConfirm(`Cancelar la importación de "${site.config.name}"? Se borrará su carpeta:\n${site.config.path}`)))
       return;
     busy = true;
     error = null;
@@ -542,9 +543,9 @@
 
   async function removeWorktree(wtId: string, branch: string) {
     if (
-      !confirm(
+      !(await askConfirm(
         `¿Eliminar el worktree «${branch}»?\n\nSe borrará el proyecto de prueba y su container, pero la RAMA se conserva en el proyecto principal para seguir trabajándola.`,
-      )
+      ))
     )
       return;
     wtRunning = true;

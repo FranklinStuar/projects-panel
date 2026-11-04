@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '$lib/api';
+  import { askConfirm } from '$lib/confirm.svelte';
   import type { DumpLogEntry } from '$lib/types';
 
   let dumpEntries = $state<DumpLogEntry[]>([]);
@@ -58,7 +59,7 @@
 
   async function cleanByDate() {
     if (!cleanBefore) return;
-    if (!confirm(`Borrar del log las entradas anteriores a ${cleanBefore}? (no borra los .sql)`)) return;
+    if (!(await askConfirm(`Borrar del log las entradas anteriores a ${cleanBefore}? (no borra los .sql)`))) return;
     await run(async () => {
       const n = await api.cleanDumpLog(cleanBefore, null);
       return `${n} entradas borradas del log.`;
@@ -67,7 +68,7 @@
 
   async function cleanByDb() {
     if (!cleanDb) return;
-    if (!confirm(`Borrar del log todas las entradas de "${cleanDb}"? (no borra los .sql)`)) return;
+    if (!(await askConfirm(`Borrar del log todas las entradas de "${cleanDb}"? (no borra los .sql)`))) return;
     await run(async () => {
       const n = await api.cleanDumpLog(null, cleanDb);
       return `${n} entradas borradas del log.`;
@@ -75,7 +76,7 @@
   }
 
   async function cleanAll() {
-    if (!confirm('Borrar TODO el log de volcados? (no borra los .sql)')) return;
+    if (!(await askConfirm('Borrar TODO el log de volcados? (no borra los .sql)'))) return;
     await run(async () => {
       const n = await api.cleanDumpLog(null, null);
       return `${n} entradas borradas del log.`;
